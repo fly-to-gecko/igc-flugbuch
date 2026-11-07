@@ -70,7 +70,7 @@ main{padding:18px 20px 40px;max-width:1500px;margin:0 auto}
 
 /* Tabelle */
 .table-wrap{overflow:auto;max-height:65vh;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-table.log{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0}
+table.log{width:100%;min-width:1310px;border-collapse:separate;border-spacing:0}
 table.log th,table.log td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
 table.log thead th{position:sticky;top:0;z-index:3;background:var(--panel2);font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;user-select:none;border-bottom:1px solid var(--line2)}
 table.log thead th[data-sort]{cursor:pointer}
@@ -79,7 +79,7 @@ table.log thead th .arrow{display:inline-block;width:10px;color:var(--amber)}
 table.log tbody tr:hover td{background:rgba(90,180,229,.04)}
 table.log tbody tr:last-child td{border-bottom:none}
 .c-date{min-width:100px}.c-plane{min-width:190px}.c-pilot{min-width:170px}.c-place{min-width:175px}
-.c-time{min-width:96px}.c-dur{min-width:90px}.c-launch{min-width:140px}.c-act{min-width:206px}
+.c-time{min-width:96px}.c-dur{min-width:90px}.c-launch{min-width:140px}.c-as{min-width:132px}.c-act{min-width:206px}
 td.mono{font-family:var(--mono);font-size:13px;white-space:nowrap}
 .cell-input{width:100%;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;min-width:0}
 .cell-input:hover{border-color:var(--line2)}
@@ -155,6 +155,19 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
 .leaflet-container{font:inherit}
 .leaflet-popup-content{color:#1a232b;font-size:13px}
 #hidden,[hidden]{display:none!important}
+.as-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:12px;font-size:12px;border:1px solid var(--line2);background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap}
+.as-badge:hover{border-color:var(--sky);color:var(--text)}
+.as-bad{color:#ffb1ac;border-color:rgba(229,96,90,.6);background:rgba(229,96,90,.12)}
+.as-check{color:var(--amber);border-color:rgba(242,169,59,.5);background:var(--amber-dim)}
+.as-ok{color:var(--green);border-color:rgba(76,195,138,.45)}
+.as-none{color:var(--dim)}
+.ftable{width:100%;border-collapse:collapse;font-size:13px}
+.ftable th,.ftable td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.ftable th{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.ftable td.mono{font-family:var(--mono);white-space:nowrap}
+.ftable .note{display:block;color:var(--muted);font-size:12px}
+.k-verletzung{color:var(--red);font-weight:600}.k-pruefen{color:var(--amber);font-weight:600}.k-info{color:var(--sky)}.k-sektor{color:var(--green)}
+.disclaimer{font-size:12px;color:var(--muted);border-left:3px solid var(--amber);padding:6px 10px;margin:12px 0 0;background:var(--amber-dim);border-radius:0 6px 6px 0}
 .banner{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin-bottom:12px;border:1px solid rgba(242,169,59,.45);border-radius:10px;background:var(--amber-dim)}
 .banner .txt{flex:1;min-width:220px}
 .banner .txt b{display:block}
@@ -194,6 +207,7 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
   <nav class="toolbar">
     <button class="btn" id="btnFolder" type="button"></button>
     <button class="btn" id="btnAirfields" type="button"></button>
+    <button class="btn" id="btnAirspace" type="button"></button>
     <button class="btn" id="btnCsv" type="button"></button>
     <button class="btn" id="btnBackup" type="button"></button>
     <button class="btn" id="btnSettings" type="button"></button>
@@ -238,6 +252,7 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
         <th class="c-time" data-sort="landT">Landung (UTC) <span class="arrow"></span></th>
         <th class="c-dur" data-sort="dur">Flugzeit <span class="arrow"></span></th>
         <th class="c-launch" data-sort="launch">Startart <span class="arrow"></span></th>
+        <th class="c-as" data-sort="as">Luftraum <span class="arrow"></span></th>
         <th class="c-act">Aktionen</th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -534,13 +549,16 @@ const Core = (() => {
     const n = fixes.length;
     const step = Math.max(1, Math.ceil(n / maxPts));
     const hasEng = fixes.some(f => f.enl != null || f.mop != null);
-    const tr = { t0: fixes[0].t, t: [], lat: [], lon: [], alt: [], eng: hasEng ? [] : null };
+    const hasPalt = fixes.some(f => f.palt !== 0);
+    // palt: Druckhöhe (Standardatmosphäre) – nötig für Luftraumgrenzen in Flugflächen
+    const tr = { t0: fixes[0].t, t: [], lat: [], lon: [], alt: [], palt: hasPalt ? [] : null, eng: hasEng ? [] : null };
     const push = i => {
       const f = fixes[i];
       tr.t.push(f.t - tr.t0);
       tr.lat.push(Math.round(f.lat * 1e5));
       tr.lon.push(Math.round(f.lon * 1e5));
       tr.alt.push(Math.round(alts[i]));
+      if (hasPalt) tr.palt.push(f.palt);
       if (hasEng) tr.eng.push(f.enl != null ? f.enl : (f.mop != null ? f.mop : 0));
     };
     for (let i = 0; i < n; i += step) push(i);
@@ -669,6 +687,214 @@ const Core = (() => {
     return best ? { airfield: best, distance: bestD } : null;
   }
 
+  // ---------- Lufträume (OpenAir-Format) ----------
+  const FT = 0.3048, NM = 1852;
+  const AS_CFG = {
+    vertTol: 30,      // m: so weit muss man über der Unter- bzw. unter der Obergrenze sein, damit es zählt (GPS-Ungenauigkeit)
+    gapSeconds: 90,   // längere Lücken trennen zwei Einflüge
+    arcStep: 5        // Grad je Bogen-Stützpunkt
+  };
+  // Art der Meldung je Luftraumklasse: verletzung = Freigabe nötig, pruefen = Aktivierung unklar, info = Hinweis
+  const AS_KIND = { A: 'verletzung', B: 'verletzung', C: 'verletzung', D: 'verletzung', CTR: 'verletzung', P: 'verletzung',
+    R: 'pruefen', Q: 'info', TMZ: 'info', RMZ: 'info' };
+  const isSector = a => a.cls === 'W' || /sektor|segelflug|glider|\bgld\b/i.test(a.name);
+
+  function parseOpenAirCoord(s) {
+    const m = /(\d+(?:[.,]\d+)?)(?::(\d+(?:[.,]\d+)?))?(?::(\d+(?:[.,]\d+)?))?\s*([NS])\s*,?\s*(\d+(?:[.,]\d+)?)(?::(\d+(?:[.,]\d+)?))?(?::(\d+(?:[.,]\d+)?))?\s*([EW])/i.exec(String(s || ''));
+    if (!m) return null;
+    const n = v => (v == null ? 0 : parseFloat(v.replace(',', '.')));
+    let lat = n(m[1]) + n(m[2]) / 60 + n(m[3]) / 3600, lon = n(m[5]) + n(m[6]) / 60 + n(m[7]) / 3600;
+    if (m[4].toUpperCase() === 'S') lat = -lat;
+    if (m[8].toUpperCase() === 'W') lon = -lon;
+    return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lat, lon] : null;
+  }
+
+  // Höhengrenze → {ref: GND|MSL|AGL|FL|UNL, m: Meter, text}
+  function parseAltLimit(s) {
+    const text = String(s || '').trim();
+    const u = text.toUpperCase().replace(/\s+/g, ' ');
+    if (!u || /^(GND|SFC|SURFACE|0)$/.test(u)) return { ref: 'GND', m: 0, text: text || 'GND' };
+    if (/UNL|UNLIM/.test(u)) return { ref: 'UNL', m: Infinity, text };
+    let m = /^FL ?(\d+)/.exec(u);
+    if (m) return { ref: 'FL', m: +m[1] * 100 * FT, text };
+    m = /^(\d+(?:\.\d+)?) ?(FT|F|M)? ?(MSL|AMSL|ALT|AGL|GND|SFC|ASFC)?/.exec(u);
+    if (m) {
+      const v = +m[1] * (m[2] === 'M' ? 1 : FT);
+      const agl = /AGL|GND|SFC|ASFC/.test(m[3] || '');
+      if (agl && v === 0) return { ref: 'GND', m: 0, text };
+      return { ref: agl ? 'AGL' : 'MSL', m: v, text };
+    }
+    return null;
+  }
+
+  function destPoint(lat, lon, brgDeg, dist) {
+    const r = Math.PI / 180, d = dist / R_EARTH, b = brgDeg * r, p1 = lat * r, l1 = lon * r;
+    const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+    const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+    return [p2 / r, l2 / r];
+  }
+  function bearing(lat1, lon1, lat2, lon2) {
+    const r = Math.PI / 180, p1 = lat1 * r, p2 = lat2 * r, dl = (lon2 - lon1) * r;
+    const y = Math.sin(dl) * Math.cos(p2), x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+    return (Math.atan2(y, x) / r + 360) % 360;
+  }
+  function arcPoints(center, radius, a1, a2, cw) {
+    const pts = [];
+    let sweep = cw ? (a2 - a1 + 360) % 360 : (a1 - a2 + 360) % 360;
+    if (sweep === 0) sweep = 360;
+    const steps = Math.max(1, Math.ceil(sweep / AS_CFG.arcStep));
+    for (let i = 0; i <= steps; i++) pts.push(destPoint(center[0], center[1], a1 + (cw ? 1 : -1) * sweep * i / steps, radius));
+    return pts;
+  }
+
+  // Liest OpenAir-Text in Lufträume mit Polygon (Bögen und Kreise werden in Punkte umgerechnet).
+  function parseOpenAir(text) {
+    const items = []; let skipped = 0;
+    let cur = null, center = null, cw = true;
+    const finish = () => {
+      if (!cur) return;
+      const p = cur.poly;
+      if (p.length >= 3 && cur.lo && cur.hi) {
+        if (p[0][0] !== p[p.length - 1][0] || p[0][1] !== p[p.length - 1][1]) p.push(p[0].slice());
+        let s = 90, w = 180, n = -90, e = -180;
+        for (const [la, lo] of p) { s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, lo); e = Math.max(e, lo); }
+        cur.bbox = [s, w, n, e];
+        cur.poly = p.map(([la, lo]) => [Math.round(la * 1e6) / 1e6, Math.round(lo * 1e6) / 1e6]);
+        items.push(cur);
+      } else skipped++;
+      cur = null;
+    };
+    for (const raw of String(text).split(/\r\n|\n|\r/)) {
+      const line = raw.trim();
+      if (!line || line[0] === '*') continue;
+      const sp = line.indexOf(' ');
+      const cmd = (sp < 0 ? line : line.slice(0, sp)).toUpperCase(), arg = sp < 0 ? '' : line.slice(sp + 1).trim();
+      if (cmd === 'AC') { finish(); cur = { cls: (arg.split(/\s+/)[0] || '').toUpperCase(), name: '', lo: null, hi: null, poly: [] }; center = null; cw = true; continue; }
+      if (!cur) continue;
+      if (cmd === 'AN') cur.name = arg;
+      else if (cmd === 'AL') cur.lo = parseAltLimit(arg);
+      else if (cmd === 'AH') cur.hi = parseAltLimit(arg);
+      else if (cmd === 'V') {
+        const m = /^([XD])\s*=\s*(.*)$/i.exec(arg);
+        if (m && m[1].toUpperCase() === 'X') center = parseOpenAirCoord(m[2]);
+        else if (m) cw = m[2].trim() !== '-';
+      } else if (cmd === 'DP') { const c = parseOpenAirCoord(arg); if (c) cur.poly.push(c); }
+      else if (cmd === 'DC' && center) {
+        const r = parseFloat(arg.replace(',', '.')) * NM;
+        if (r > 0) cur.poly.push(...arcPoints(center, r, 0, 0, true));
+      } else if (cmd === 'DA' && center) {
+        const [r, a1, a2] = arg.split(',').map(x => parseFloat(x.replace(/[^\d.\-]/g, '')));
+        if (r > 0 && isFinite(a1) && isFinite(a2)) cur.poly.push(...arcPoints(center, r * NM, a1, a2, cw));
+      } else if (cmd === 'DB' && center) {
+        const parts = arg.split(/,(?=\s*\d)/);
+        const p1 = parseOpenAirCoord(parts[0]), p2 = parseOpenAirCoord(parts.slice(1).join(','));
+        if (p1 && p2) {
+          const r = haversine(center[0], center[1], p1[0], p1[1]);
+          cur.poly.push(...arcPoints(center, r, bearing(center[0], center[1], p1[0], p1[1]), bearing(center[0], center[1], p2[0], p2[1]), cw));
+        }
+      }
+    }
+    finish();
+    return { items, skipped };
+  }
+
+  // Gültigkeitsdatum aus Dateikopf ("effective from 25th March 2021") oder Dateiname (Jahreszahl)
+  const MONTHS = { jan: 1, feb: 2, mar: 3, mär: 3, apr: 4, may: 5, mai: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, okt: 10, nov: 11, dec: 12, dez: 12 };
+  function guessValidFrom(text, fileName) {
+    const head = String(text).slice(0, 4000);
+    let m = /effective\s+(?:from\s+|date\s+)?(\d{1,2})(?:st|nd|rd|th)?\.?\s+([a-zä]{3})[a-zä]*\.?\s+(\d{4})/i.exec(head);
+    if (m && MONTHS[m[2].toLowerCase()]) return `${m[3]}-${String(MONTHS[m[2].toLowerCase()]).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    m = /(?:^|[^\d])((?:19|20)\d{2})(?:[^\d]|$)/.exec(fileName || '') || /(?:^|[^\d])((?:19|20)\d{2})(?:[^\d]|$)/.exec(head);
+    return m ? `${m[1]}-01-01` : '';
+  }
+
+  function pointInPoly(lat, lon, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [yi, xi] = poly[i], [yj, xj] = poly[j];
+      if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  // Abstand zum Rand (m), lokal eben gerechnet – reicht für die Eindringtiefe
+  function distToEdge(lat, lon, poly) {
+    const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110540;
+    let best = Infinity;
+    for (let i = 1; i < poly.length; i++) {
+      const ax = (poly[i - 1][1] - lon) * kx, ay = (poly[i - 1][0] - lat) * ky, bx = (poly[i][1] - lon) * kx, by = (poly[i][0] - lat) * ky;
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+      best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+    }
+    return best;
+  }
+
+  // Höhe eines Punkts bezogen auf die Art der Grenze: FL → Druckhöhe, MSL → GPS-Höhe, AGL → über Startplatzhöhe (geschätzt)
+  function levelFor(limit, p) {
+    if (limit.ref === 'FL') return p.palt != null ? p.palt : p.alt;
+    if (limit.ref === 'AGL') return p.alt - p.ground;
+    return p.alt;
+  }
+  function verticalDepth(a, p, tol) {
+    const below = a.hi.ref === 'UNL' ? Infinity : a.hi.m - levelFor(a.hi, p);
+    const above = a.lo.ref === 'GND' ? Infinity : levelFor(a.lo, p) - a.lo.m;
+    return Math.min(below, above) - tol;
+  }
+
+  // track: kompakter Track (siehe compactTrack); flight: takeoffT/landingT; airspaces: parseOpenAir-Items
+  function checkAirspaces(track, flight, airspaces, tol = AS_CFG.vertTol) {
+    const pts = [];
+    for (let i = 0; i < track.t.length; i++) {
+      const t = track.t0 + track.t[i];
+      if (t < flight.takeoffT || t > flight.landingT) continue;
+      pts.push({ t, lat: track.lat[i] / 1e5, lon: track.lon[i] / 1e5, alt: track.alt[i], palt: track.palt ? track.palt[i] : null });
+    }
+    if (!pts.length) return [];
+    const ground = pts[0].alt;
+    for (const p of pts) p.ground = ground;
+    let s = 90, w = 180, n = -90, e = -180;
+    for (const p of pts) { s = Math.min(s, p.lat); n = Math.max(n, p.lat); w = Math.min(w, p.lon); e = Math.max(e, p.lon); }
+    const near = airspaces.filter(a => a.bbox[0] <= n && a.bbox[2] >= s && a.bbox[1] <= e && a.bbox[3] >= w);
+    const sectors = near.filter(isSector);
+    const relevant = near.filter(a => AS_KIND[a.cls] && !isSector(a));
+    const inside = (a, p) => p.lat >= a.bbox[0] && p.lat <= a.bbox[2] && p.lon >= a.bbox[1] && p.lon <= a.bbox[3] && pointInPoly(p.lat, p.lon, a.poly);
+    const findings = [];
+    for (const a of relevant) {
+      let ep = null;
+      const close = () => { if (ep) { findings.push(ep); ep = null; } };
+      for (const p of pts) {
+        if (!inside(a, p)) { close(); continue; }
+        const dv = verticalDepth(a, p, tol);
+        if (dv <= 0) { close(); continue; }
+        if (ep && p.t - ep.t2 > AS_CFG.gapSeconds) close();
+        const inSector = sectors.some(sc => inside(sc, p) && verticalDepth(sc, p, 0) > 0);
+        if (!ep) ep = { cls: a.cls, name: a.name, lo: a.lo.text, hi: a.hi.text, t1: p.t, t2: p.t, points: 0, sectorPoints: 0,
+          maxVert: 0, maxHoriz: 0, minAlt: Infinity, maxAlt: -Infinity, agl: a.lo.ref === 'AGL' || a.hi.ref === 'AGL', ref: a.ref };
+        ep.t2 = p.t; ep.points++;
+        if (inSector) ep.sectorPoints++;
+        ep.maxVert = Math.max(ep.maxVert, Math.min(dv + tol, 99999));
+        ep.maxHoriz = Math.max(ep.maxHoriz, distToEdge(p.lat, p.lon, a.poly));
+        ep.minAlt = Math.min(ep.minAlt, p.alt); ep.maxAlt = Math.max(ep.maxAlt, p.alt);
+      }
+      close();
+    }
+    for (const f of findings) {
+      f.kind = AS_KIND[f.cls];
+      f.notes = [];
+      if (f.sectorPoints === f.points) { f.kind = 'sektor'; f.notes.push('vollständig in einem Segelflugsektor'); }
+      else if (f.sectorPoints) f.notes.push('teilweise in einem Segelflugsektor');
+      // nur wenn der Start- bzw. Landepunkt selbst im Luftraum liegt (Flugplatz in der CTR)
+      const atAirfield = f.t1 === pts[0].t || f.t2 === pts[pts.length - 1].t;
+      if (atAirfield && f.kind === 'verletzung') { f.kind = 'pruefen'; f.notes.push('Start oder Landung innerhalb – vermutlich mit Freigabe'); }
+      if (f.agl) { f.notes.push('Grenze über Grund – Geländehöhe geschätzt (Startplatz)'); if (f.kind === 'verletzung') f.kind = 'pruefen'; }
+      f.maxVert = Math.round(f.maxVert); f.maxHoriz = Math.round(f.maxHoriz);
+      delete f.sectorPoints;
+    }
+    // gleicher Luftraum aus mehreren Dateien (z. B. Land + Europa) nur einmal
+    const seen = new Set();
+    return findings.sort((x, y) => x.t1 - y.t1).filter(f => { const k = f.cls + '|' + f.name + '|' + f.t1; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+
   // ---------- Formatierung ----------
   const pad = (n, w = 2) => String(n).padStart(w, '0');
   function fmtHM(sec) {
@@ -702,7 +928,7 @@ const Core = (() => {
   return {
     CFG, LAUNCH_TYPES, haversine, decodeBytes, hashText, parseIGC, chooseAltitudes, groundSpeeds, detectFlight,
     classifyLaunch, analyzeIGC, compactTrack, parseCSVLine, parseCupLat, parseCupLon, parseElev, parseCUP,
-    parseCoordInput, matchAirfield, fmtHM, fmtHMS, fmtDuration, fmtDateDE, fmtCoord, toCSV, isoDate
+    parseCoordInput, matchAirfield, AS_CFG, parseOpenAirCoord, parseAltLimit, parseOpenAir, guessValidFrom, pointInPoly, checkAirspaces, fmtHM, fmtHMS, fmtDuration, fmtDateDE, fmtCoord, toCSV, isoDate
   };
 })();
 if (typeof window !== 'undefined') window.Core = Core;
@@ -737,6 +963,7 @@ const ICONS = {
   restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>',
   folder: '<path d="M3.5 6.5a1 1 0 0 1 1-1h4.8l2 2.2h8.2a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/>',
   refresh: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18 3.5v4h-4M6 20.5v-4h4"/>',
+  layers: '<path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5M3.5 16l8.5 4.5 8.5-4.5"/>',
   unlink: '<path d="M9.5 14.5 7.3 16.7a3 3 0 0 1-4.2-4.2l2.6-2.6a3 3 0 0 1 4.2 0M14.5 9.5l2.2-2.2a3 3 0 0 1 4.2 4.2l-2.6 2.6a3 3 0 0 1-4.2 0M4 4l16 16"/>'
 };
 function icon(name, size = 18) {
@@ -902,13 +1129,13 @@ const Store = (() => {
   return { init, get, set, del, label, get mode() { return mode; } };
 })();
 
-const K_FLIGHTS = 'flugbuch.flights.v1', K_AIRFIELDS = 'flugbuch.airfields.v1', K_SETTINGS = 'flugbuch.settings.v1', K_META = 'flugbuch.meta.v1';
+const K_FLIGHTS = 'flugbuch.flights.v1', K_AIRFIELDS = 'flugbuch.airfields.v1', K_SETTINGS = 'flugbuch.settings.v1', K_META = 'flugbuch.meta.v1', K_AIRSPACES = 'flugbuch.airspaces.v1';
 const trackKey = id => 'flugbuch.track.' + id;
 
 // ---------- Zustand ----------
 // ignored: gelöschte Flüge ({hash, srcKey, fileName}), damit sie beim Einlesen des Ordners nicht wiederkommen
 // meta.savedAt: Zeitpunkt der letzten Änderung – entscheidet, ob Browser oder flugbuch.json aktueller ist
-const state = { flights: [], airfields: [], ignored: [], settings: { apiKey: '', copyImports: true }, meta: { savedAt: '' }, search: '', sort: { key: 'date', dir: -1 } };
+const state = { flights: [], airfields: [], airspaces: [], ignored: [], settings: { apiKey: '', copyImports: true }, meta: { savedAt: '' }, search: '', sort: { key: 'date', dir: -1 } };
 
 async function loadJSON(key, fallback) {
   const raw = await Store.get(key);
@@ -954,7 +1181,7 @@ async function importFiles(fileList, opts = {}) {
   const copyTo = !fromFolder && state.settings.copyImports !== false && Folder.ready();
   const byHash = new Map(state.flights.map(f => [f.hash, f]));
   const ignoredByHash = new Map(state.ignored.map(i => [i.hash, i]));
-  let added = 0, dup = 0, skipped = 0, copied = 0, changed = false; const errors = [];
+  let added = 0, dup = 0, skipped = 0, copied = 0, changed = false; const errors = [], newFlights = [];
   const prog = $('progress');
   for (let i = 0; i < items.length; i++) {
     const { file, path, key } = items[i];
@@ -988,7 +1215,7 @@ async function importFiles(fileList, opts = {}) {
       }
       matchFlight(f);
       if (!await Store.set(trackKey(f.id), JSON.stringify(track))) throw new Error('Track konnte nicht gespeichert werden');
-      state.flights.push(f); byHash.set(hash, f); added++;
+      state.flights.push(f); byHash.set(hash, f); newFlights.push(f); added++;
     } catch (e) {
       if (!fromFolder || Folder.firstError(key)) errors.push(`${path || file.name}: ${e.message}`);
     }
@@ -996,6 +1223,7 @@ async function importFiles(fileList, opts = {}) {
   }
   prog.textContent = '';
   if (added || changed) await saveFlights();
+  if (newFlights.length && state.airspaces.length) await Airspace.checkFlights(newFlights, { quiet: true });
   if (added && !fromFolder) Folder.askPersist();
   render();
   if (fromFolder && !added && !errors.length) return { added };
@@ -1021,12 +1249,13 @@ const sortValue = {
   takeoffT: f => f.takeoffT % 86400,
   landT: f => f.landingT % 86400,
   dur: f => f.durationMin,
-  launch: f => f.launchType
+  launch: f => f.launchType,
+  as: f => asSummary(f).rank
 };
 
 function searchText(f) {
   return [C.fmtDateDE(f.date), f.date, f.gliderType, f.gliderId, f.compId, f.pilot, f.copilot, placeText(f, 'start'), placeText(f, 'land'),
-    C.fmtHM(f.takeoffT), C.fmtHM(f.landingT), C.fmtDuration(f.durationMin), f.launchType, f.fileName].join(' ').toLowerCase();
+    C.fmtHM(f.takeoffT), C.fmtHM(f.landingT), C.fmtDuration(f.durationMin), f.launchType, f.fileName, asSummary(f).search].join(' ').toLowerCase();
 }
 
 function visibleFlights() {
@@ -1117,6 +1346,7 @@ function rowFor(f) {
     el('td', { class: 'mono', 'data-tip': C.fmtHMS(f.landingT) + ' UTC' }, C.fmtHM(f.landingT), f.dayShift > 0 ? el('span', { class: 'dayshift', text: '+' + f.dayShift }) : null),
     durCell,
     el('td', null, sel, src),
+    el('td', null, asBadge(f)),
     el('td', null, el('div', { class: 'actions' },
       iconBtn('pin', 'Startort auf Karte zeigen', 'i-start', () => showPlace(f, 'start')),
       iconBtn('flag', 'Landeort auf Karte zeigen', 'i-land', () => showPlace(f, 'land')),
@@ -1295,7 +1525,7 @@ function showPlace(f, which) {
     });
 }
 
-async function showTrack(f) {
+async function showTrack(f, opts = {}) {
   if (!leafletOk()) return;
   const tr = await loadTrack(f);
   if (!tr) return;
@@ -1304,7 +1534,9 @@ async function showTrack(f) {
   for (let i = 0; i < pts.length; i++) { const t = tr.t0 + tr.t[i]; if (t >= f.takeoffT && t <= f.landingT) fl.push(pts[i]); }
   let dist = 0;
   for (let i = 1; i < fl.length; i++) dist += C.haversine(fl[i - 1][0], fl[i - 1][1], fl[i][0], fl[i][1]);
-  openMap(`Flugstrecke ${planeText(f) || ''}`.trim(), `${C.fmtDateDE(f.date)} · ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC`,
+  const findings = opts.airspace && f.asResult ? f.asResult.findings.filter(x => x.kind !== 'info' || opts.withInfo) : [];
+  const asIdx = findings.length ? Airspace.index() : null;
+  openMap(`${findings.length ? 'Luftraum-Einflüge' : 'Flugstrecke'} ${planeText(f) || ''}`.trim(), `${C.fmtDateDE(f.date)} · ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC`,
     [el('span', null, 'Start: ', el('b', { text: placeText(f, 'start') })), el('span', null, 'Landung: ', el('b', { text: placeText(f, 'land') })),
      el('span', null, 'Flugzeit: ', el('b', { text: C.fmtDuration(f.durationMin) })), el('span', null, 'Spurlänge: ', el('b', { text: (dist / 1000).toFixed(0) + ' km' })),
      el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' }))],
@@ -1313,9 +1545,26 @@ async function showTrack(f) {
       const flPts = fl.length > 1 ? fl : pts;
       L.polyline(flPts, { color: '#ffffff', weight: 8, opacity: 0.7 }).addTo(g); // heller Rand für Kontrast auf jeder Kartenart
       const line = L.polyline(flPts, { color: '#0b3a8c', weight: 5, opacity: 1 }).addTo(g);
+      let bounds = line.getBounds();
+      for (const x of findings) {
+        const color = AS_COLORS[x.kind];
+        const a = asIdx.get(x.ref);
+        if (a) {
+          const poly = L.polygon(a.poly, { color, weight: 2, fillOpacity: 0.12, dashArray: x.kind === 'sektor' ? '6 4' : null })
+            .bindTooltip(escapeHtml(`${a.cls} ${a.name} (${a.lo.text} – ${a.hi.text})`)).addTo(g);
+          poly.bringToBack();
+        }
+        const seg = [];
+        for (let i = 0; i < pts.length; i++) { const t = tr.t0 + tr.t[i]; if (t >= x.t1 && t <= x.t2) seg.push(pts[i]); }
+        if (seg.length === 1) seg.push(seg[0]);
+        if (seg.length) {
+          L.polyline(seg, { color, weight: 7, opacity: 0.95 }).bindTooltip(escapeHtml(`${AS_LABELS[x.kind]}: ${x.cls} ${x.name}`) + `<br>${C.fmtHM(x.t1)}–${C.fmtHM(x.t2)} UTC`).addTo(g);
+          bounds = opts.airspace ? L.latLngBounds(seg).extend(bounds) : bounds;
+        }
+      }
       L.circleMarker([f.startLat, f.startLon], startStyle).bindTooltip(`Start ${C.fmtHM(f.takeoffT)} UTC – ${placeText(f, 'start')}`).addTo(g);
       L.circleMarker([f.landLat, f.landLon], landStyle).bindTooltip(`Landung ${C.fmtHM(f.landingT)} UTC – ${placeText(f, 'land')}`).addTo(g);
-      m.fitBounds(line.getBounds(), { padding: [30, 30] });
+      m.fitBounds(bounds, { padding: [30, 30] });
     });
 }
 
@@ -1629,9 +1878,9 @@ async function clearAll() {
 function exportCsv() {
   const list = visibleFlights();
   if (!list.length) return toast('Keine Flüge zum Exportieren.', 'warn');
-  const rows = [['Datum', 'Flugzeug', 'Pilot', 'Startort', 'Landeort', 'Start (UTC)', 'Landung (UTC)', 'Flugzeit', 'Startart']];
+  const rows = [['Datum', 'Flugzeug', 'Pilot', 'Startort', 'Landeort', 'Start (UTC)', 'Landung (UTC)', 'Flugzeit', 'Startart', 'Luftraum']];
   for (const f of list) rows.push([C.fmtDateDE(f.date), planeText(f), f.pilot, placeText(f, 'start'), placeText(f, 'land'),
-    C.fmtHM(f.takeoffT), C.fmtHM(f.landingT) + (f.dayShift > 0 ? ` (+${f.dayShift})` : ''), C.fmtDuration(f.durationMin), f.launchType]);
+    C.fmtHM(f.takeoffT), C.fmtHM(f.landingT) + (f.dayShift > 0 ? ` (+${f.dayShift})` : ''), C.fmtDuration(f.durationMin), f.launchType, asSummary(f).csv]);
   download(`flugbuch_${new Date().toISOString().slice(0, 10)}.csv`, C.toCSV(rows), 'text/csv;charset=utf-8');
   toast(`${list.length} Flüge als CSV exportiert` + (list.length !== state.flights.length ? ' (aktueller Filter)' : '') + '.', 'ok');
 }
@@ -1678,12 +1927,173 @@ function showBackup() {
   });
 }
 
+// ---------- Luftraumprüfung ----------
+// Luftraumdaten (OpenAir) werden als "Datensätze" mit Gültigkeitsdatum gespeichert. Für einen Flug zählen alle Datensätze
+// aus dem jüngsten Jahrgang, der vor dem Flugdatum gültig war (z. B. Deutschland 2021 + Österreich 2021).
+const AS_LABELS = { verletzung: 'Verletzung', pruefen: 'prüfen', info: 'Hinweis', sektor: 'Segelflugsektor' };
+const AS_COLORS = { verletzung: '#d62828', pruefen: '#e08a00', info: '#1f7fc4', sektor: '#2a9d5c' };
+
+function asSummary(f) {
+  const r = f.asResult;
+  if (!r) return { cls: 'as-none', text: 'nicht geprüft', rank: 0, csv: 'nicht geprüft', search: '',
+    tip: state.airspaces.length ? 'Noch nicht geprüft – unter „Lufträume“ alle Flüge prüfen' : 'Keine Luftraumdaten – unter „Lufträume“ eine OpenAir-Datei einlesen' };
+  const n = r.counts, parts = [];
+  if (n.verletzung) parts.push(`${n.verletzung} Verletzung${n.verletzung > 1 ? 'en' : ''}`);
+  if (n.pruefen) parts.push(`${n.pruefen} prüfen`);
+  if (n.sektor) parts.push(`${n.sektor} Segelflugsektor`);
+  if (n.info) parts.push(`${n.info} Hinweis${n.info > 1 ? 'e' : ''} (TMZ/RMZ/ED-D)`);
+  const tip = (parts.join('\n') || 'Keine Einflüge in kontrollierte oder gesperrte Lufträume') + '\nKlicken für Details';
+  if (n.verletzung) return { cls: 'as-bad', text: parts[0], rank: 3, csv: parts.join(', '), search: 'luftraumverletzung', tip };
+  if (n.pruefen) return { cls: 'as-check', text: `${n.pruefen} prüfen`, rank: 2, csv: parts.join(', '), search: 'luftraum prüfen', tip };
+  return { cls: 'as-ok', text: 'keine Verletzung', rank: 1, csv: parts.length ? parts.join(', ') : 'keine', search: 'luftraum ok', tip };
+}
+function asBadge(f) {
+  const s = asSummary(f);
+  return el('button', { type: 'button', class: 'as-badge ' + s.cls, 'data-tip': s.tip, 'data-fid': f.id, 'data-field': 'as',
+    onclick: () => (f.asResult ? showAsFindings(f) : showAirspaces()) }, s.text);
+}
+
+const Airspace = (() => {
+  let byRef = null;
+  function index() {
+    if (!byRef) {
+      byRef = new Map();
+      for (const set of state.airspaces) set.items.forEach((a, i) => { a.ref = set.id + ':' + i; byRef.set(a.ref, a); });
+    }
+    return byRef;
+  }
+  const year = s => (s.validFrom || '0000').slice(0, 4);
+  function setsFor(date) {
+    const sets = state.airspaces;
+    if (!sets.length) return { sets: [], note: '' };
+    const older = sets.filter(s => (s.validFrom || '') <= (date || '9999'));
+    if (older.length) { const y = older.map(year).sort().pop(); return { sets: older.filter(s => year(s) === y), note: '' }; }
+    const y = sets.map(year).sort()[0];
+    return { sets: sets.filter(s => year(s) === y), note: 'Die Luftraumdaten sind jünger als der Flug – damals können andere Grenzen gegolten haben.' };
+  }
+  async function trackFor(f) {
+    const tr = await loadJSON(trackKey(f.id), null);
+    if (tr && tr.t && tr.t.length) return tr;
+    return f.srcPath ? Folder.rebuildTrack(f) : null;
+  }
+  async function checkFlight(f) {
+    const { sets, note } = setsFor(f.date);
+    if (!sets.length) return false;
+    const tr = await trackFor(f);
+    if (!tr) return false;
+    index();
+    const findings = C.checkAirspaces(tr, f, sets.flatMap(s => s.items));
+    const counts = { verletzung: 0, pruefen: 0, info: 0, sektor: 0 };
+    for (const x of findings) counts[x.kind]++;
+    f.asResult = { checkedAt: new Date().toISOString(), sets: sets.map(s => `${s.name} (gültig ab ${C.fmtDateDE(s.validFrom) || '?'})`), note, counts, findings, noPalt: !tr.palt };
+    return true;
+  }
+  async function checkFlights(list, opts = {}) {
+    if (!state.airspaces.length) { toast('Keine Luftraumdaten vorhanden. Bitte zuerst eine OpenAir-Datei einlesen.', 'warn'); return; }
+    const prog = $('progress');
+    let failed = 0;
+    for (let i = 0; i < list.length; i++) {
+      prog.textContent = `Prüfe Lufträume ${i + 1} / ${list.length} …`;
+      try { if (!await checkFlight(list[i])) failed++; } catch (e) { failed++; console.warn(e); }
+      if (i % 10 === 9) await new Promise(r => setTimeout(r, 0));
+    }
+    prog.textContent = '';
+    await saveFlights(); render();
+    const bad = list.filter(f => f.asResult && f.asResult.counts.verletzung).length;
+    const chk = list.filter(f => f.asResult && !f.asResult.counts.verletzung && f.asResult.counts.pruefen).length;
+    if (!opts.quiet || bad || chk)
+      toast(`Luftraumprüfung (${list.length} ${list.length === 1 ? 'Flug' : 'Flüge'}): ${bad} mit Verletzung, ${chk} zum Prüfen` + (failed ? `, ${failed} ohne Trackdaten` : ''), bad ? 'warn' : 'ok', 7000);
+  }
+  async function changed() {
+    byRef = null;
+    if (!await Store.set(K_AIRSPACES, JSON.stringify(state.airspaces))) toast('Luftraumdaten konnten nicht gespeichert werden (Speicher voll?).', 'error');
+    Folder.scheduleAirspaceWrite();
+  }
+  return { index, setsFor, checkFlight, checkFlights, changed };
+})();
+
+function showAsFindings(f) {
+  const r = f.asResult;
+  const kindCell = x => el('td', null, el('span', { class: 'k-' + x.kind, text: AS_LABELS[x.kind] }), x.notes.map(n => el('span', { class: 'note', text: n })));
+  const rows = r.findings.map(x => el('tr', null,
+    el('td', { class: 'mono' }, `${C.fmtHM(x.t1)}–${C.fmtHM(x.t2)}`),
+    el('td', null, el('b', { text: `${x.cls} ` }), x.name),
+    el('td', { class: 'mono' }, `${x.lo} – ${x.hi}`),
+    el('td', { class: 'mono' }, `${Math.round(x.minAlt)}–${Math.round(x.maxAlt)} m`),
+    el('td', { class: 'mono', 'data-tip': 'vertikal: Abstand zur nächsten Grenze nach oben/unten\nhorizontal: Abstand zum Rand' }, `${x.maxVert} m / ${(x.maxHoriz / 1000).toFixed(1)} km`),
+    kindCell(x)));
+  const body = el('div', null,
+    r.findings.length ? el('div', { style: 'overflow:auto' }, el('table', { class: 'ftable' },
+      el('thead', null, el('tr', null, ['Zeit (UTC)', 'Luftraum', 'Grenzen', 'GPS-Höhe', 'Eindringtiefe', 'Bewertung'].map(h => el('th', { text: h })))),
+      el('tbody', null, rows)))
+      : el('p', { text: 'Keine Einflüge in kontrollierte, gesperrte oder meldepflichtige Lufträume gefunden.' }),
+    el('p', { class: 'hint', style: 'margin-top:12px' }, `Geprüft mit: ${r.sets.join(', ')}. Geprüft am ${C.fmtDateDE(r.checkedAt.slice(0, 10))}.`,
+      r.note ? el('b', { style: 'display:block;color:var(--amber)', text: r.note }) : null,
+      r.noPalt ? el('span', { style: 'display:block', text: 'Diese Datei enthält keine Druckhöhe – Flugflächen wurden mit der GPS-Höhe verglichen.' }) : null),
+    el('p', { class: 'disclaimer', text: 'Automatische Auswertung ohne Gewähr: Freigaben der Flugsicherung, Aktivierungszeiten (ED-R, Segelflugsektoren) und NOTAMs sind nicht bekannt. Grenzen über Grund werden mit der Startplatzhöhe geschätzt. „Prüfen“ bedeutet: bitte selbst bewerten.' }));
+  const m = openModal({ title: 'Luftraumprüfung', sub: `${C.fmtDateDE(f.date)} · ${planeText(f)} · alle Zeiten UTC`, size: 'lg', body,
+    foot: [
+      el('button', { type: 'button', class: 'btn', html: icon('refresh', 16) + '<span>Neu prüfen</span>', onclick: async () => { m.close(); await Airspace.checkFlights([f]); showAsFindings(f); } }),
+      el('button', { type: 'button', class: 'btn primary', html: icon('route', 16) + '<span>Auf Karte zeigen</span>', onclick: () => { m.close(); showTrack(f, { airspace: true, withInfo: true }); } })] });
+}
+
+function showAirspaces() {
+  const body = el('div');
+  const fileInp = el('input', { type: 'file', accept: '.txt,.air,.openair,.TXT', multiple: true, hidden: true });
+  fileInp.addEventListener('change', async () => {
+    const files = Array.from(fileInp.files); fileInp.value = '';
+    let added = 0;
+    for (const file of files) {
+      try {
+        const text = C.decodeBytes(await readFile(file));
+        const r = C.parseOpenAir(text);
+        if (!r.items.length) { toast(`${file.name}: keine Lufträume im OpenAir-Format gefunden.`, 'error'); continue; }
+        const validFrom = C.guessValidFrom(text, file.name);
+        state.airspaces.push({ id: uid(), name: file.name.replace(/\.[^.]+$/, ''), validFrom, importedAt: new Date().toISOString(), items: r.items });
+        added++;
+        toast(`${file.name}: ${r.items.length} Lufträume eingelesen` + (validFrom ? `, gültig ab ${C.fmtDateDE(validFrom)}` : ' – bitte „gültig ab“ eintragen') + (r.skipped ? ` (${r.skipped} unvollständige übersprungen)` : ''), 'ok', 6000);
+      } catch (e) { toast(`${file.name}: ${e.message}`, 'error'); }
+    }
+    if (added) { await Airspace.changed(); draw(); await Airspace.checkFlights(state.flights); draw(); }
+  });
+  const draw = () => {
+    const sets = state.airspaces.slice().sort((a, b) => (a.validFrom || '').localeCompare(b.validFrom || '') || a.name.localeCompare(b.name));
+    const checked = state.flights.filter(f => f.asResult).length;
+    const list = sets.length ? el('div', { class: 'af-list' }, sets.map(set => {
+      const date = el('input', { type: 'date', value: set.validFrom || '', 'aria-label': 'gültig ab', style: 'padding:4px 6px;border-radius:6px;border:1px solid var(--line2);background:var(--bg);color-scheme:dark' });
+      date.addEventListener('change', async () => { set.validFrom = date.value; await Airspace.changed(); toast('Gültigkeit geändert – zum Übernehmen „Alle Flüge prüfen“.', 'info'); });
+      const counts = {};
+      for (const a of set.items) counts[a.cls] = (counts[a.cls] || 0) + 1;
+      const summary = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 7).map(([k, v]) => `${v} ${k}`).join(' · ');
+      return el('div', { class: 'af-row' },
+        el('div', { class: 'n' }, el('b', { text: set.name }), el('span', { text: `${set.items.length} Lufträume: ${summary}` })),
+        el('label', { style: 'font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px' }, 'gültig ab', date),
+        iconBtn('trash', 'Datensatz löschen', 'i-del', async () => {
+          if (!await confirmDialog(`Luftraumdaten „${set.name}“ löschen?`)) return;
+          state.airspaces = state.airspaces.filter(x => x !== set);
+          await Airspace.changed(); draw();
+        }));
+    })) : el('div', { class: 'empty', style: 'padding:24px', text: 'Noch keine Luftraumdaten eingelesen.' });
+    body.replaceChildren(
+      el('p', { class: 'hint', text: 'Die App prüft jede Flugspur gegen Luftraumdaten im OpenAir-Format (.txt, wie für SeeYou, XCSoar oder LXNAV). Die Dateien werden nur im Browser gelesen. Für Flüge aus verschiedenen Jahren kannst du mehrere Datensätze mit „gültig ab“-Datum einlesen. Für jeden Flug zählt der jüngste Jahrgang, der zum Flugdatum schon galt; mehrere Länder desselben Jahrgangs werden zusammen verwendet.' }),
+      el('div', { class: 'row', style: 'margin-bottom:12px' },
+        el('button', { type: 'button', class: 'btn primary', html: icon('upload', 16) + '<span>OpenAir-Datei(en) einlesen</span>', onclick: () => fileInp.click() }), fileInp,
+        state.airspaces.length ? el('button', { type: 'button', class: 'btn', html: icon('refresh', 16) + '<span>Alle Flüge prüfen</span>', onclick: async () => { await Airspace.checkFlights(state.flights); draw(); } }) : null),
+      list,
+      el('p', { class: 'hint', style: 'margin-top:12px', text: `${checked} von ${state.flights.length} Flügen geprüft. Bewertet werden Luftraum C, D, CTR und Sperrgebiete als „Verletzung“, Flugbeschränkungsgebiete (ED-R) als „prüfen“, TMZ, RMZ und Gefahrengebiete (ED-D) als Hinweis. Flüge in Segelflugsektoren werden gesondert ausgewiesen.` }),
+      el('p', { class: 'disclaimer', text: 'Ohne Gewähr: Freigaben, Aktivierungszeiten und NOTAMs kennt die App nicht. Ergebnisse sind Hinweise zum Nachprüfen, keine Feststellung.' }));
+  };
+  openModal({ title: 'Lufträume', size: 'lg', body });
+  draw();
+}
+
 // ---------- Lokaler Flugbuch-Ordner (File System Access API: Chrome, Edge, Brave, Opera) ----------
 // Die IGC-Dateien bleiben in einem Ordner auf dem Rechner. Die App merkt sich den Ordner, liest beim Start neue
 // Dateien automatisch ein und schreibt ihre Daten (ohne Tracks) zusätzlich als kleine flugbuch.json in den Ordner.
-const DATA_FILE = 'flugbuch.json';
+const DATA_FILE = 'flugbuch.json', AS_FILE = 'luftraeume.json';
 const Folder = (() => {
   const supported = typeof window.showDirectoryPicker === 'function';
+  let asTimer = null;
   let handle = null, perm = 'none', lastSync = 0, syncing = false, writeTimer = null, writeErrShown = false, loading = false, persistAsked = false;
   const errorKeys = new Set();
 
@@ -1725,7 +2135,31 @@ const Folder = (() => {
     updateUi();
     if (ready()) await activate();
   }
-  async function activate() { await readData(); await sync(); }
+  async function activate() { await readAirspaces(); await readData(); await sync(); }
+
+  // Luftraumdaten liegen zusätzlich als luftraeume.json im Ordner (nur eingelesen, wenn der Browser keine hat)
+  async function readAirspaces() {
+    if (!ready()) return;
+    if (state.airspaces.length) { scheduleAirspaceWrite(); return; }
+    try {
+      const data = JSON.parse(await (await (await handle.getFileHandle(AS_FILE)).getFile()).text());
+      if (data && data.app === 'igc-flugbuch' && Array.isArray(data.sets) && data.sets.length) {
+        state.airspaces = data.sets;
+        await Store.set(K_AIRSPACES, JSON.stringify(state.airspaces));
+      }
+    } catch (e) { /* keine Datei */ }
+  }
+  function scheduleAirspaceWrite() {
+    if (!ready()) return;
+    clearTimeout(asTimer);
+    asTimer = setTimeout(async () => {
+      try {
+        const w = await (await handle.getFileHandle(AS_FILE, { create: true })).createWritable();
+        await w.write(JSON.stringify({ app: 'igc-flugbuch', kind: 'luftraeume', version: 1, sets: state.airspaces }));
+        await w.close();
+      } catch (e) { toast(`${AS_FILE} konnte nicht in den Ordner geschrieben werden: ${e.message}`, 'warn'); }
+    }, 800);
+  }
 
   async function choose() {
     if (!supported) { toast('Dieser Browser unterstützt keinen Ordnerzugriff. Bitte Chrome, Edge, Brave oder Opera verwenden.', 'warn', 7000); return; }
@@ -1908,7 +2342,7 @@ const Folder = (() => {
     document.dispatchEvent(new Event('folderchange'));
   }
 
-  return { supported, init, choose, reconnect, disconnect, sync, ready, name, scheduleWrite, storeCopy, rebuildTrack, firstError, askPersist,
+  return { supported, init, choose, reconnect, disconnect, sync, ready, name, scheduleWrite, scheduleAirspaceWrite, storeCopy, rebuildTrack, firstError, askPersist,
     get lastSync() { return lastSync; } };
 })();
 
@@ -1947,7 +2381,7 @@ function wireUi() {
   $('dropIcon').innerHTML = icon('upload', 22);
   $('searchIcon').innerHTML = icon('search', 16);
   $('utcNote').innerHTML = icon('clock', 14) + '<span>Alle Zeiten in <b>UTC</b></span>';
-  const tb = [['btnFolder', 'folder', 'Ordner'], ['btnAirfields', 'runway', 'Flugplätze'], ['btnCsv', 'download', 'CSV-Export'], ['btnBackup', 'save', 'Sicherung'], ['btnSettings', 'sliders', 'Einstellungen']];
+  const tb = [['btnFolder', 'folder', 'Ordner'], ['btnAirfields', 'runway', 'Flugplätze'], ['btnAirspace', 'layers', 'Lufträume'], ['btnCsv', 'download', 'CSV-Export'], ['btnBackup', 'save', 'Sicherung'], ['btnSettings', 'sliders', 'Einstellungen']];
   for (const [id, ic, label] of tb) { $(id).innerHTML = icon(ic, 17) + `<span class="lbl">${label}</span>`; $(id).setAttribute('aria-label', label); $(id).setAttribute('data-tip', label); }
   $('btnFolder').onclick = showFolder;
   $('btnFolder').setAttribute('data-tip', 'Lokaler Flugbuch-Ordner');
@@ -1956,6 +2390,7 @@ function wireUi() {
     if (document.visibilityState === 'visible' && Folder.ready() && Date.now() - Folder.lastSync > 15000) Folder.sync();
   });
   $('btnAirfields').onclick = showAirfields;
+  $('btnAirspace').onclick = showAirspaces;
   $('btnCsv').onclick = exportCsv;
   $('btnBackup').onclick = showBackup;
   $('btnSettings').onclick = showSettings;
@@ -1987,6 +2422,7 @@ async function init() {
   await Store.init();
   state.flights = (await loadJSON(K_FLIGHTS, [])).filter(f => f && f.id);
   state.airfields = await loadJSON(K_AIRFIELDS, []);
+  state.airspaces = await loadJSON(K_AIRSPACES, []);
   state.settings = Object.assign({ apiKey: '', copyImports: true }, await loadJSON(K_SETTINGS, {}));
   const meta = await loadJSON(K_META, {});
   state.meta.savedAt = meta.savedAt || (state.flights.length ? '0' : '');

@@ -239,6 +239,115 @@ test('Flugplatz-Abgleich: Radius 3 km und nächster Platz', () => {
   eq(Core.matchAirfield(51.015, 9, afs).airfield.name, 'B');
 });
 
+// ---------- Lufträume ----------
+const OPENAIR = [
+  '* Kommentar: effective from 25th March 2021',
+  'AC CTR', 'AN CTR Teststadt', 'AH 3000ft MSL', 'AL GND',
+  'DP 51:00:00 N 009:00:00 E', 'DP 51:00:00 N 009:10:00 E', 'DP 50:54:00 N 009:10:00 E', 'DP 50:54:00 N 009:00:00 E', 'DP 51:00:00 N 009:00:00 E',
+  '', 'AC C', 'AN TMA Hoch', 'AH FL100', 'AL FL65',
+  'DP 51:30:00 N 010:00:00 E', 'DP 51:30:00 N 010:20:00 E', 'DP 51:20:00 N 010:20:00 E', 'DP 51:20:00 N 010:00:00 E',
+  '', 'AC R', 'AN ED-R Kreis', 'AH 5000ft MSL', 'AL GND', 'V X=52:00:00 N 011:00:00 E', 'DC 2',
+  '', 'AC D', 'AN EDXX Luftraum D', 'AH 4500ft MSL', 'AL 1500ft MSL',
+  'DP 50:30:00 N 008:00:00 E', 'DP 50:30:00 N 008:10:00 E', 'DP 50:24:00 N 008:10:00 E', 'DP 50:24:00 N 008:00:00 E',
+  '', 'AC W', 'AN Segelflugsektor West', 'AH 4500ft MSL', 'AL GND',
+  'DP 50:31:00 N 007:59:00 E', 'DP 50:31:00 N 008:11:00 E', 'DP 50:23:00 N 008:11:00 E', 'DP 50:23:00 N 007:59:00 E',
+  '', 'AC TMZ', 'AN TMZ Test', 'AH FL100', 'AL GND',
+  'DP 51:00:00 N 009:00:00 E', 'DP 51:00:00 N 009:10:00 E', 'DP 50:54:00 N 009:10:00 E', 'DP 50:54:00 N 009:00:00 E',
+  '', 'AC E', 'AN Luftraum E', 'AH FL100', 'AL 2500ft AGL',
+  'DP 51:00:00 N 009:00:00 E', 'DP 51:00:00 N 009:10:00 E', 'DP 50:54:00 N 009:10:00 E',
+  '', 'AC Q', 'AN ED-D Bogen', 'AH FL100', 'AL GND', 'V X=53:00:00 N 012:00:00 E', 'V D=-', 'DA 3,90,270',
+  '', 'AC Q', 'AN ED-D Bogen DB', 'AH FL100', 'AL GND', 'V X=54:00:00 N 012:00:00 E', 'V D=+', 'DB 54:00:00 N 011:55:06 E, 54:00:00 N 012:04:54 E'
+].join('\r\n');
+
+// Track direkt im kompakten Format: Punkte [Sekunde, Breite, Länge, GPS-Höhe, Druckhöhe]
+function mkTrack(points) {
+  return { t0: 0, t: points.map(p => p[0]), lat: points.map(p => Math.round(p[1] * 1e5)), lon: points.map(p => Math.round(p[2] * 1e5)),
+    alt: points.map(p => p[3]), palt: points.map(p => p[4] != null ? p[4] : p[3]) };
+}
+// Gerader Flug von A nach B im Abstand von 10 s
+function line(lat1, lon1, lat2, lon2, alt, palt, t0 = 1000, n = 60) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) pts.push([t0 + i * 10, lat1 + (lat2 - lat1) * i / n, lon1 + (lon2 - lon1) * i / n, alt, palt]);
+  return pts;
+}
+const AS = Core.parseOpenAir(OPENAIR).items;
+const byName = n => AS.find(a => a.name === n);
+const flightOf = pts => ({ takeoffT: pts[0][0] - 600, landingT: pts[pts.length - 1][0] + 600 });
+const check = pts => Core.checkAirspaces(mkTrack(pts), flightOf(pts), AS);
+
+test('OpenAir: Koordinaten D:M:S und D:M.m', () => {
+  const a = Core.parseOpenAirCoord('49:14:38 N 010:31:20 E'); near(a[0], 49 + 14 / 60 + 38 / 3600, 1e-9); near(a[1], 10 + 31 / 60 + 20 / 3600, 1e-9);
+  const b = Core.parseOpenAirCoord('49:14.5 S 010:31.25 W'); near(b[0], -(49 + 14.5 / 60), 1e-9); near(b[1], -(10 + 31.25 / 60), 1e-9);
+});
+test('OpenAir: Höhengrenzen', () => {
+  const L = s => Core.parseAltLimit(s);
+  eq(L('GND').ref, 'GND'); eq(L('SFC').ref, 'GND'); eq(L('0ft AGL').ref, 'GND'); eq(L('UNL').ref, 'UNL');
+  near(L('3000ft MSL').m, 914.4, 0.01); eq(L('3500 ft').ref, 'MSL');
+  near(L('FL95').m, 2895.6, 0.01); near(L('FL 65').m, 1981.2, 0.01); eq(L('FL 65').ref, 'FL');
+  eq(L('2500ft AGL').ref, 'AGL'); eq(L('1000ft GND').ref, 'AGL'); near(L('1500m MSL').m, 1500, 0.01);
+});
+test('OpenAir: alle Lufträume gelesen (Polygon, Kreis, Bögen), Kommentare ignoriert', () => {
+  eq(AS.length, 9);
+  eq(byName('CTR Teststadt').cls, 'CTR');
+  const r = byName('ED-R Kreis');
+  ok(r.poly.length > 60, 'Kreis in Punkte umgerechnet');
+  near(Core.haversine(52, 11, r.poly[10][0], r.poly[10][1]), 2 * 1852, 5, 'Radius 2 NM');
+  ok(byName('ED-D Bogen').poly.length > 20 && byName('ED-D Bogen DB').poly.length > 20, 'DA/DB-Bögen');
+});
+test('OpenAir: Kreis – innen/außen', () => {
+  const r = byName('ED-R Kreis');
+  ok(Core.pointInPoly(52 + 3000 / 111195, 11, r.poly), '3 km innen'); ok(!Core.pointInPoly(52 + 4000 / 111195, 11, r.poly), '4 km außen');
+});
+test('OpenAir: Bögen DA (gegen den Uhrzeigersinn) und DB (im Uhrzeigersinn) – Halbkreis im Norden', () => {
+  for (const [n, c] of [['ED-D Bogen', 53], ['ED-D Bogen DB', 54]]) {
+    const q = byName(n);
+    ok(Core.pointInPoly(c + 0.02, 12, q.poly), n + ': Nordhälfte innen'); ok(!Core.pointInPoly(c - 0.02, 12, q.poly), n + ': Südhälfte außen');
+  }
+});
+test('Gültigkeitsdatum aus Dateikopf oder Dateiname', () => {
+  eq(Core.guessValidFrom(OPENAIR, 'x.txt'), '2021-03-25');
+  eq(Core.guessValidFrom('AC D', 'OpenAir_Airspace_Germany_CW14_2015.txt'), '2015-01-01');
+  eq(Core.guessValidFrom('AC D', 'airspace.txt'), '');
+});
+test('Luftraumprüfung: Durchflug CTR unterhalb der Obergrenze = Verletzung, TMZ = Info', () => {
+  const f = check(line(50.97, 8.9, 50.97, 9.3, 600));
+  const ctr = f.find(x => x.name === 'CTR Teststadt');
+  ok(ctr, 'CTR erkannt'); eq(ctr.kind, 'verletzung');
+  ok(ctr.t2 > ctr.t1, 'Zeitraum'); near(ctr.maxVert, 914 - 600, 2, 'Abstand zur Obergrenze');
+  eq(f.find(x => x.name === 'TMZ Test').kind, 'info');
+  ok(!f.some(x => x.cls === 'E'), 'Luftraum E wird ignoriert');
+});
+test('Luftraumprüfung: über der CTR und knapp unter der Obergrenze (Toleranz) = keine Meldung', () => {
+  ok(!check(line(50.97, 8.9, 50.97, 9.3, 1000)).some(x => x.cls === 'CTR'), 'über der CTR');
+  ok(!check(line(50.97, 8.9, 50.97, 9.3, 900)).some(x => x.cls === 'CTR'), '14 m unter der Grenze');
+});
+test('Luftraumprüfung: Flugflächen werden mit der Druckhöhe verglichen', () => {
+  const pts = line(51.4, 9.9, 51.4, 10.4, 2100, 1900); // FL65 = 1981 m
+  ok(!check(pts).some(x => x.name === 'TMA Hoch'), 'Druckhöhe unter FL65');
+  ok(check(line(51.4, 9.9, 51.4, 10.4, 2100, 2100)).some(x => x.name === 'TMA Hoch' && x.kind === 'verletzung'), 'Druckhöhe über FL65');
+});
+test('Luftraumprüfung: Flug im Segelflugsektor = sektor statt Verletzung', () => {
+  const f = check(line(50.45, 7.95, 50.45, 8.2, 900)).find(x => x.name === 'EDXX Luftraum D');
+  ok(f, 'D erkannt'); eq(f.kind, 'sektor');
+});
+test('Luftraumprüfung: Start in der CTR = prüfen (Freigabe wahrscheinlich)', () => {
+  const pts = line(50.97, 9.05, 50.97, 9.4, 600);
+  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0], landingT: pts[pts.length - 1][0] + 600 }, AS).find(x => x.cls === 'CTR');
+  eq(f.kind, 'pruefen'); ok(f.notes.some(n => /Start/.test(n)));
+});
+test('Luftraumprüfung: Abstieg aus Luftraum C kurz vor der Landung bleibt Verletzung', () => {
+  const pts = line(51.4, 9.9, 51.4, 10.5, 2100, 2100).map((p, i, arr) => i > arr.length - 8 ? [p[0], p[1], p[2], 1500, 1500] : p);
+  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0] - 600, landingT: pts[pts.length - 1][0] + 30 }, AS).find(x => x.name === 'TMA Hoch');
+  eq(f.kind, 'verletzung');
+});
+test('Luftraumprüfung: Flugbeschränkungsgebiet = prüfen (Aktivierung unbekannt)', () => {
+  eq(check(line(51.95, 10.9, 52.05, 11.1, 800)).find(x => x.cls === 'R').kind, 'pruefen');
+});
+test('Luftraumprüfung: Track ohne Druckhöhe nutzt GPS-Höhe für FL', () => {
+  const tr = mkTrack(line(51.4, 9.9, 51.4, 10.4, 2100)); tr.palt = null;
+  ok(Core.checkAirspaces(tr, flightOf(line(51.4, 9.9, 51.4, 10.4, 2100)), AS).some(x => x.name === 'TMA Hoch'));
+});
+
 // ---------- Ausgabe ----------
 const failed = results.filter(r => !r.ok);
 document.getElementById('out').textContent =

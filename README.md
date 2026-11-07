@@ -18,6 +18,8 @@ Startart und Flugplätze werden automatisch erkannt. Eine einzige HTML-Datei, ke
   Satellit (Esri), Luftfahrtkarte (openflightmaps) – alle ohne API-Key
 - Lufträume und Flugplätze von openflightmaps (Europa) ohne Key, optional zusätzlich openAIP-Lufträume (eigener API-Key)
 - Barogramm auf Canvas mit Fadenkreuz und ENL-Anzeige
+- Luftraumprüfung: OpenAir-Dateien (z. B. von SeeYou/XCSoar/LXNAV) einlesen, jede Flugspur wird gegen die Lufträume
+  geprüft (Spalte „Luftraum“, Details mit Zeiten in UTC, Eindringtiefe und Karte)
 - IGC-Header (A-, H-, I-Zeilen) als Rohtext
 - CSV-Export (`;`, UTF-8 mit BOM für Excel) und JSON-Sicherung zum Übertragen/Wiederherstellen
 
@@ -58,6 +60,24 @@ Bart (5 m/s) als Windenstart erkannt. Die Schwellwerte stehen gesammelt in `Core
 Die Flugzeit ergibt sich aus den angezeigten Minuten (Landung 11:15 − Start 10:03 = 1:12), damit Tabelle und
 Flugbuch übereinstimmen. Landungen nach Mitternacht werden mit `+1` markiert.
 
+## Luftraumprüfung
+
+| Luftraum | Bewertung |
+|---|---|
+| C, D, CTR, A, B, Sperrgebiet (P) | Verletzung |
+| Flugbeschränkungsgebiet (ED-R) | prüfen (Aktivierung unbekannt) |
+| TMZ, RMZ, Gefahrengebiet (ED-D, Q) | Hinweis |
+| Segelflugsektor (Klasse W oder Name „Sektor“) | eigener Hinweis; Einflüge in C/D/CTR innerhalb eines Sektors gelten nicht als Verletzung |
+| E, F, G | ignoriert |
+
+- Höhe: Grenzen in Flugflächen werden mit der **Druckhöhe** (IGC, Standardatmosphäre) verglichen,
+  Grenzen in ft/m MSL mit der GPS-Höhe, Grenzen über Grund mit der Höhe über dem Startplatz (geschätzt → „prüfen“).
+- Toleranz 30 m vertikal; Einflüge mit Lücken über 90 s werden getrennt gezählt.
+- Liegt der Start- oder Landepunkt selbst im Luftraum (Flugplatz in der CTR), wird „prüfen“ statt „Verletzung“ gemeldet.
+- Mehrere Datensätze mit „gültig ab“-Datum möglich: Für jeden Flug zählt der jüngste Jahrgang, der zum Flugdatum galt.
+- Mit verbundenem Ordner werden die Luftraumdaten zusätzlich als `luftraeume.json` abgelegt.
+- Ohne Gewähr: Freigaben, Aktivierungszeiten und NOTAMs sind nicht bekannt.
+
 ## Tests
 
 ```bash
@@ -66,5 +86,6 @@ python3 tests/make_samples.py   # synthetische Beispiel-IGC-Dateien nach tests/b
 ```
 
 Die Tests lesen den Core-Block direkt aus `index.html` und prüfen B-/H-/I-Records, Mitternachtsübergang,
-Start-/Landeerkennung, Startart, CUP-Parsing, Flugplatz-Abgleich und CSV. Die Dateien in `tests/beispiele/` sind
+Start-/Landeerkennung, Startart, CUP-Parsing, Flugplatz-Abgleich, CSV sowie OpenAir-Parsing (Polygone, Kreise, Bögen,
+Höhengrenzen) und die Luftraumprüfung. Die Dateien in `tests/beispiele/` sind
 synthetisch und nur zum Ausprobieren gedacht.
