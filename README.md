@@ -14,7 +14,9 @@ Startart und Flugplätze werden automatisch erkannt. Eine einzige HTML-Datei, ke
 - Flugplatz-Datenbank: Abgleich im Radius 3 km, Benennen unbekannter Orte direkt in der Tabelle,
   Import von SeeYou-`.cup`-Dateien, manuelles Hinzufügen/Suchen/Löschen, optionale Suche über die openAIP-API
 - Tabelle mit direkt editierbaren Zellen, Suche, Sortierung und Statistik-Kacheln
-- Karte (Leaflet) mit Start-/Landeort, Flugstrecke und openAIP-Lufträumen (eigener API-Key)
+- Karte (Leaflet) mit Start-/Landeort und Flugstrecke; Kartenart wählbar: OpenStreetMap, OpenTopoMap,
+  Satellit (Esri), Luftfahrtkarte (openflightmaps) – alle ohne API-Key
+- Lufträume und Flugplätze von openflightmaps (Europa) ohne Key, optional zusätzlich openAIP-Lufträume (eigener API-Key)
 - Barogramm auf Canvas mit Fadenkreuz und ENL-Anzeige
 - IGC-Header (A-, H-, I-Zeilen) als Rohtext
 - CSV-Export (`;`, UTF-8 mit BOM für Excel) und JSON-Sicherung zum Übertragen/Wiederherstellen

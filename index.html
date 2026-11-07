@@ -118,7 +118,7 @@ select.launch:focus{outline:none;border-color:var(--sky)}
 .modal-head h2{font-size:16px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal-head .sub{color:var(--muted);font-size:12px;font-weight:400;margin-left:8px}
 .modal-body{padding:16px 18px;overflow:auto;flex:1;min-height:0}
-.modal-body.flush{padding:0;display:flex;flex-direction:column}
+.modal-body.flush{padding:0;display:flex;flex-direction:column;overflow:hidden}
 .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
 #mapHost{flex:1;min-height:300px;background:#dfe5ea}
 .map-info{padding:8px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap}
@@ -1193,48 +1193,82 @@ async function loadTrack(f) {
 
 // ---------- Karte ----------
 let map = null, mapGroup = null, airspaceLayer = null, layerCtl = null, airspaceErrShown = false, mapModal = null;
+let baseLayers = null, ofmLayer = null;
 
 function leafletOk() {
   if (typeof L === 'undefined') { toast('Die Kartenbibliothek (Leaflet) konnte nicht geladen werden.\nBitte Internetverbindung prüfen – alle anderen Funktionen arbeiten weiter.', 'error', 7000); return false; }
   return true;
 }
 
+// Alle Kartenquellen kommen ohne API-Key aus (CARTO verlangt seit 2026 einen Key und wird daher nicht mehr genutzt).
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende';
+const OFM_ATTR = 'Luftfahrtdaten &copy; <a href="https://www.openflightmaps.org" target="_blank" rel="noopener">open flightmaps</a>';
+const OFM_URL = path => `https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/${path}/latest`;
+const OFM_OPT = { tileSize: 512, zoomOffset: -1, minZoom: 4, maxNativeZoom: 14, maxZoom: 19 }; // 512-px-Kacheln
+const BASE_MAPS = {
+  osm: ['OpenStreetMap', 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM_ATTR }],
+  topo: ['Topografisch (OpenTopoMap)', 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    { subdomains: 'abc', maxNativeZoom: 17, maxZoom: 19, attribution: `Karte &copy; <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a> (CC-BY-SA), Daten ${OSM_ATTR}` }],
+  sat: ['Satellit (Esri)', 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxNativeZoom: 18, maxZoom: 19, attribution: 'Bilder &copy; Esri, Maxar, Earthstar Geographics' }],
+  ofm: ['Luftfahrtkarte (openflightmaps)', OFM_URL('base'), Object.assign({ attribution: OFM_ATTR }, OFM_OPT)]
+};
+
+function setupLayers() {
+  baseLayers = {};
+  for (const [id, [name, url, opt]] of Object.entries(BASE_MAPS)) baseLayers[id] = L.tileLayer(url, opt);
+  (baseLayers[state.settings.baseMap] || baseLayers.osm).addTo(map);
+  ofmLayer = L.tileLayer(OFM_URL('aero'), Object.assign({ attribution: OFM_ATTR, zIndex: 5 }, OFM_OPT));
+  if (state.settings.showOfm !== false) ofmLayer.addTo(map);
+  const name = layer => Object.keys(baseLayers).find(k => baseLayers[k] === layer);
+  map.on('baselayerchange', e => { state.settings.baseMap = name(e.layer) || 'osm'; saveSettings(); });
+  map.on('overlayadd overlayremove', e => {
+    const on = e.type === 'overlayadd';
+    if (e.layer === ofmLayer) state.settings.showOfm = on;
+    if (e.layer === airspaceLayer) state.settings.showOpenAip = on;
+    saveSettings();
+  });
+  setupAirspace();
+}
+
+// Ebenen-Auswahl oben rechts; openAIP erscheint nur, wenn ein API-Key hinterlegt ist.
 function setupAirspace() {
-  if (!map) return;
+  if (!map || !baseLayers) return;
   if (airspaceLayer) { map.removeLayer(airspaceLayer); airspaceLayer = null; }
   if (layerCtl) { layerCtl.remove(); layerCtl = null; }
+  const overlays = { 'Lufträume & Flugplätze (openflightmaps, ohne Key)': ofmLayer };
   const key = (state.settings.apiKey || '').trim();
-  if (!key) return;
-  airspaceErrShown = false;
-  airspaceLayer = L.tileLayer('https://{s}.api.tiles.openaip.net/api/data/airspaces/{z}/{x}/{y}.png?apiKey=' + encodeURIComponent(key), {
-    subdomains: ['a', 'b', 'c'], minZoom: 4, maxNativeZoom: 14, maxZoom: 19, opacity: 0.9,
-    attribution: 'Lufträume &copy; <a href="https://www.openaip.net" target="_blank" rel="noopener">openAIP</a>'
-  });
-  airspaceLayer.on('tileerror', () => {
-    if (airspaceErrShown) return;
-    airspaceErrShown = true;
-    toast('openAIP-Lufträume konnten nicht geladen werden.\nBitte den API-Key in den Einstellungen prüfen.', 'warn', 7000);
-  });
-  airspaceLayer.addTo(map);
-  layerCtl = L.control.layers(null, { 'Lufträume (openAIP)': airspaceLayer }, { collapsed: false }).addTo(map);
+  if (key) {
+    airspaceErrShown = false;
+    airspaceLayer = L.tileLayer('https://{s}.api.tiles.openaip.net/api/data/airspaces/{z}/{x}/{y}.png?apiKey=' + encodeURIComponent(key), {
+      subdomains: ['a', 'b', 'c'], minZoom: 4, maxNativeZoom: 14, maxZoom: 19, opacity: 0.9, zIndex: 6,
+      attribution: 'Lufträume &copy; <a href="https://www.openaip.net" target="_blank" rel="noopener">openAIP</a>'
+    });
+    airspaceLayer.on('tileerror', () => {
+      if (airspaceErrShown) return;
+      airspaceErrShown = true;
+      toast('openAIP-Lufträume konnten nicht geladen werden.\nBitte den API-Key in den Einstellungen prüfen.', 'warn', 7000);
+    });
+    if (state.settings.showOpenAip !== false) airspaceLayer.addTo(map);
+    overlays['Lufträume (openAIP)'] = airspaceLayer;
+  }
+  const names = {};
+  for (const [id, layer] of Object.entries(baseLayers)) names[BASE_MAPS[id][0]] = layer;
+  layerCtl = L.control.layers(names, overlays, { collapsed: true }).addTo(map);
 }
 
 function openMap(title, sub, info, draw) {
   if (!leafletOk()) return;
   const host = $('mapHost');
-  const infoEl = el('div', { class: 'map-info' }, info || []);
+  const infoEl = el('div', { class: 'map-info' }, info || [], el('span', { style: 'margin-left:auto', text: 'Kartenart und Lufträume: Ebenen-Symbol oben rechts' }));
   if (mapModal) mapModal.close();
   const wrap = el('div', { style: 'display:flex;flex-direction:column;flex:1;min-height:0' }, host, infoEl);
   mapModal = openModal({ title, sub, size: 'xl', body: wrap, flush: true, onClose: () => { $('hidden').append(host); mapModal = null; } });
   if (!map) {
     map = L.map(host, { zoomControl: true, attributionControl: true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd', maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
-    }).addTo(map);
     mapGroup = L.layerGroup().addTo(map);
     map.setView([51, 10], 6);
-    setupAirspace();
+    setupLayers();
   }
   mapGroup.clearLayers();
   requestAnimationFrame(() => { map.invalidateSize(); draw(map, mapGroup); });
@@ -1567,7 +1601,7 @@ function showSettings() {
   const m = openModal({
     title: 'Einstellungen', body: el('div', null,
       el('div', { class: 'section', style: 'border-top:none;margin-top:0;padding-top:0' }, el('h3', { text: 'Lufträume (openAIP)' }),
-        el('p', { class: 'hint' }, 'Für die Luftraum-Ebene auf der Karte wird ein persönlicher, kostenloser API-Key benötigt. Registrierung auf ',
+        el('p', { class: 'hint' }, 'Lufträume und Flugplätze von openflightmaps (Europa) zeigt die Karte ohne Anmeldung. Optional lässt sich zusätzlich die Luftraum-Ebene von openAIP einblenden; dafür wird ein persönlicher, kostenloser API-Key benötigt. Registrierung auf ',
           el('a', { href: 'https://www.openaip.net', target: '_blank', rel: 'noopener', text: 'openaip.net' }),
           ', dann im Benutzerprofil unter „API Clients“ einen Key erzeugen.'),
         el('div', { class: 'field' }, el('label', { text: 'API-Key' }), key),
