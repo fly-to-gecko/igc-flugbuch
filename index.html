@@ -154,7 +154,22 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
 .tip.show{opacity:1}
 .leaflet-container{font:inherit}
 .leaflet-popup-content{color:#1a232b;font-size:13px}
-#hidden{display:none}
+#hidden,[hidden]{display:none!important}
+.banner{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin-bottom:12px;border:1px solid rgba(242,169,59,.45);border-radius:10px;background:var(--amber-dim)}
+.banner .txt{flex:1;min-width:220px}
+.banner .txt b{display:block}
+.banner .txt span{color:var(--muted);font-size:13px}
+.banner svg{color:var(--amber)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;border:1px solid var(--line2);background:var(--panel);color:var(--muted);font-size:12px;cursor:pointer}
+.chip:hover{color:var(--text);border-color:var(--sky)}
+.chip svg{color:var(--sky)}
+.chip.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-box{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line2);border-radius:8px;background:var(--bg);margin-bottom:12px}
+.status-box .dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
+.status-box .dot.on{background:var(--green)}.status-box .dot.wait{background:var(--amber)}
+.status-box b{display:block}
+.status-box span{font-size:12px;color:var(--muted)}
 
 @media (max-width:760px){
   .topbar{padding:12px 16px}
@@ -177,6 +192,7 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
     <div><h1>Digitales Flugbuch</h1><p>IGC-Auswertung Segelflug · Zeiten in UTC</p></div>
   </div>
   <nav class="toolbar">
+    <button class="btn" id="btnFolder" type="button"></button>
     <button class="btn" id="btnAirfields" type="button"></button>
     <button class="btn" id="btnCsv" type="button"></button>
     <button class="btn" id="btnBackup" type="button"></button>
@@ -185,6 +201,7 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
 </header>
 
 <main>
+  <div class="banner" id="folderBanner" hidden></div>
   <label class="drop" id="drop" tabindex="0">
     <div class="drop-icon" id="dropIcon"></div>
     <div>
@@ -205,6 +222,7 @@ textarea.raw{width:100%;min-height:52vh;resize:vertical;font-family:var(--mono);
   <div class="listbar">
     <div class="search"><span id="searchIcon"></span><input type="search" id="search" placeholder="Suchen: Pilot, Flugzeug, Ort, Datum …" autocomplete="off"></div>
     <span class="count" id="count"></span>
+    <button type="button" class="chip" id="folderChip" hidden></button>
     <span class="utc-note" id="utcNote"></span>
   </div>
 
@@ -716,7 +734,10 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5z"/>',
-  restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>'
+  restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>',
+  folder: '<path d="M3.5 6.5a1 1 0 0 1 1-1h4.8l2 2.2h8.2a1 1 0 0 1 1 1v9.8a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18 3.5v4h-4M6 20.5v-4h4"/>',
+  unlink: '<path d="M9.5 14.5 7.3 16.7a3 3 0 0 1-4.2-4.2l2.6-2.6a3 3 0 0 1 4.2 0M14.5 9.5l2.2-2.2a3 3 0 0 1 4.2 4.2l-2.6 2.6a3 3 0 0 1-4.2 0M4 4l16 16"/>'
 };
 function icon(name, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -881,22 +902,31 @@ const Store = (() => {
   return { init, get, set, del, label, get mode() { return mode; } };
 })();
 
-const K_FLIGHTS = 'flugbuch.flights.v1', K_AIRFIELDS = 'flugbuch.airfields.v1', K_SETTINGS = 'flugbuch.settings.v1';
+const K_FLIGHTS = 'flugbuch.flights.v1', K_AIRFIELDS = 'flugbuch.airfields.v1', K_SETTINGS = 'flugbuch.settings.v1', K_META = 'flugbuch.meta.v1';
 const trackKey = id => 'flugbuch.track.' + id;
 
 // ---------- Zustand ----------
-const state = { flights: [], airfields: [], settings: { apiKey: '' }, search: '', sort: { key: 'date', dir: -1 } };
+// ignored: gelöschte Flüge ({hash, srcKey, fileName}), damit sie beim Einlesen des Ordners nicht wiederkommen
+// meta.savedAt: Zeitpunkt der letzten Änderung – entscheidet, ob Browser oder flugbuch.json aktueller ist
+const state = { flights: [], airfields: [], ignored: [], settings: { apiKey: '', copyImports: true }, meta: { savedAt: '' }, search: '', sort: { key: 'date', dir: -1 } };
 
 async function loadJSON(key, fallback) {
   const raw = await Store.get(key);
   if (!raw) return fallback;
   try { return JSON.parse(raw); } catch (e) { return fallback; }
 }
+async function touch() {
+  state.meta.savedAt = new Date().toISOString();
+  await Store.set(K_META, JSON.stringify({ savedAt: state.meta.savedAt, ignored: state.ignored }));
+  Folder.scheduleWrite();
+}
 async function saveFlights() {
   if (!await Store.set(K_FLIGHTS, JSON.stringify(state.flights))) toast('Flugbuch konnte nicht gespeichert werden (Speicher voll?).', 'error');
+  await touch();
 }
 async function saveAirfields() {
   if (!await Store.set(K_AIRFIELDS, JSON.stringify(state.airfields))) toast('Flugplätze konnten nicht gespeichert werden.', 'error');
+  await touch();
 }
 async function saveSettings() { await Store.set(K_SETTINGS, JSON.stringify(state.settings)); }
 
@@ -916,38 +946,68 @@ const placeText = (f, w) => placeName(f, w) || placeCoord(f, w);
 const planeText = f => [f.gliderType, f.gliderId ? `(${f.gliderId})` : ''].filter(Boolean).join(' ');
 
 // ---------- Import ----------
-async function importFiles(fileList) {
-  const files = Array.from(fileList || []);
-  if (!files.length) return;
-  const known = new Set(state.flights.map(f => f.hash));
-  let added = 0, dup = 0, skipped = 0; const errors = [];
+// items: File-Objekte (Drag & Drop / Dateiauswahl) oder {file, path, key} aus dem Flugbuch-Ordner
+async function importFiles(fileList, opts = {}) {
+  const items = Array.from(fileList || []).map(x => x instanceof Blob ? { file: x } : x);
+  if (!items.length) return { added: 0 };
+  const fromFolder = !!opts.fromFolder;
+  const copyTo = !fromFolder && state.settings.copyImports !== false && Folder.ready();
+  const byHash = new Map(state.flights.map(f => [f.hash, f]));
+  const ignoredByHash = new Map(state.ignored.map(i => [i.hash, i]));
+  let added = 0, dup = 0, skipped = 0, copied = 0, changed = false; const errors = [];
   const prog = $('progress');
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    prog.textContent = `Verarbeite ${i + 1} / ${files.length} …`;
+  for (let i = 0; i < items.length; i++) {
+    const { file, path, key } = items[i];
+    prog.textContent = `${fromFolder ? 'Lese Ordner' : 'Verarbeite'} ${i + 1} / ${items.length} …`;
     if (!/\.igc$/i.test(file.name)) { skipped++; continue; }
     try {
-      const text = C.decodeBytes(await readFile(file));
+      const buf = await readFile(file);
+      const text = C.decodeBytes(buf);
       const hash = C.hashText(text);
-      if (known.has(hash)) { dup++; continue; }
+      const ex = byHash.get(hash);
+      if (ex) {
+        // bekannter Flug: nur die Verknüpfung zur Datei im Ordner aktualisieren
+        if (path && ex.srcKey !== key) { ex.srcPath = path; ex.srcKey = key; changed = true; }
+        else if (copyTo && !ex.srcPath) {
+          const r = await Folder.storeCopy(file.name, buf);
+          if (r) { ex.srcPath = r.path; ex.srcKey = r.key; copied++; changed = true; }
+        }
+        dup++; continue;
+      }
+      const ig = ignoredByHash.get(hash);
+      if (ig) {
+        if (fromFolder) { if (key && ig.srcKey !== key) { ig.srcKey = key; changed = true; } continue; }
+        state.ignored = state.ignored.filter(x => x !== ig); changed = true; // bewusst erneut importiert
+      }
       const { flight, track } = C.analyzeIGC(text);
       const f = Object.assign({ id: 'f' + hash, hash, fileName: file.name, importedAt: new Date().toISOString() }, flight);
+      if (path) { f.srcPath = path; f.srcKey = key; }
+      else if (copyTo) {
+        const r = await Folder.storeCopy(file.name, buf);
+        if (r) { f.srcPath = r.path; f.srcKey = r.key; copied++; }
+      }
       matchFlight(f);
       if (!await Store.set(trackKey(f.id), JSON.stringify(track))) throw new Error('Track konnte nicht gespeichert werden');
-      state.flights.push(f); known.add(hash); added++;
-    } catch (e) { errors.push(`${file.name}: ${e.message}`); }
+      state.flights.push(f); byHash.set(hash, f); added++;
+    } catch (e) {
+      if (!fromFolder || Folder.firstError(key)) errors.push(`${path || file.name}: ${e.message}`);
+    }
     if (i % 5 === 4) await new Promise(r => setTimeout(r, 0)); // Oberfläche reagiert weiter
   }
   prog.textContent = '';
-  if (added) await saveFlights();
+  if (added || changed) await saveFlights();
+  if (added && !fromFolder) Folder.askPersist();
   render();
+  if (fromFolder && !added && !errors.length) return { added };
   const parts = [];
-  parts.push(`${added} ${added === 1 ? "Flug" : "Flüge"} importiert`);
-  if (dup) parts.push(`${dup} Duplikat${dup === 1 ? '' : 'e'} übersprungen`);
+  parts.push(`${added} ${added === 1 ? 'Flug' : 'Flüge'} ${fromFolder ? 'neu aus dem Ordner eingelesen' : 'importiert'}`);
+  if (dup && !fromFolder) parts.push(`${dup} Duplikat${dup === 1 ? '' : 'e'} übersprungen`);
+  if (copied) parts.push(`${copied} in den Flugbuch-Ordner kopiert`);
   if (skipped) parts.push(`${skipped} Datei${skipped === 1 ? '' : 'en'} ohne .igc-Endung ignoriert`);
   let msg = parts.join(' · ');
   if (errors.length) msg += `\nFehler:\n` + errors.slice(0, 6).join('\n') + (errors.length > 6 ? `\n… und ${errors.length - 6} weitere` : '');
   toast(msg, errors.length ? (added ? 'warn' : 'error') : (added ? 'ok' : 'warn'), errors.length ? 9000 : 4500);
+  return { added };
 }
 
 // ---------- Tabelle ----------
@@ -1115,14 +1175,19 @@ async function deleteFlight(f) {
   const ok = await confirmDialog(`Flug vom ${C.fmtDateDE(f.date) || '?'} (${planeText(f) || 'unbekanntes Flugzeug'}, ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC) wirklich löschen?`);
   if (!ok) return;
   state.flights = state.flights.filter(x => x.id !== f.id);
+  if (!state.ignored.some(i => i.hash === f.hash)) state.ignored.push({ hash: f.hash, srcKey: f.srcKey || '', fileName: f.srcPath || f.fileName });
   await Store.del(trackKey(f.id));
   await saveFlights(); render();
-  toast('Flug gelöscht.', 'ok');
+  toast(f.srcPath ? 'Flug gelöscht. Die IGC-Datei bleibt im Ordner und wird beim Einlesen übersprungen.' : 'Flug gelöscht.', 'ok');
 }
 
 async function loadTrack(f) {
-  const tr = await loadJSON(trackKey(f.id), null);
-  if (!tr || !tr.t || !tr.t.length) { toast('Für diesen Flug sind keine Trackdaten gespeichert.', 'error'); return null; }
+  let tr = await loadJSON(trackKey(f.id), null);
+  if ((!tr || !tr.t || !tr.t.length) && f.srcPath) tr = await Folder.rebuildTrack(f);
+  if (!tr || !tr.t || !tr.t.length) {
+    toast(f.srcPath ? `Trackdaten fehlen. Die Datei „${f.srcPath}“ ist im Flugbuch-Ordner nicht erreichbar.` : 'Für diesen Flug sind keine Trackdaten gespeichert.', 'error');
+    return null;
+  }
   return tr;
 }
 
@@ -1508,16 +1573,18 @@ function showSettings() {
         el('div', { class: 'field' }, el('label', { text: 'API-Key' }), key),
         el('label', { class: 'check' }, showKey, 'Key anzeigen')),
       el('div', { class: 'section' }, el('h3', { text: 'Speicher' }),
-        el('p', { class: 'hint', text: `Ablage: ${Store.label()}. Die Daten liegen nur in diesem Browser – regelmäßig über „Sicherung“ exportieren.` }),
+        el('p', { class: 'hint', text: `Ablage: ${Store.label()}` + (Folder.ready() ? `, zusätzlich „${DATA_FILE}“ im Flugbuch-Ordner „${Folder.name()}“.` : '. Die Daten liegen nur in diesem Browser – einen lokalen Flugbuch-Ordner verbinden oder regelmäßig über „Sicherung“ exportieren.') }),
         el('button', { type: 'button', class: 'btn danger', html: icon('trash', 16) + '<span>Flugbuch komplett leeren</span>', onclick: clearAll })))
     , foot: [el('button', { type: 'button', class: 'btn', text: 'Abbrechen', onclick: () => m.close() }), el('button', { type: 'button', class: 'btn primary', text: 'Speichern', onclick: save })]
   });
 }
 
 async function clearAll() {
-  if (!await confirmDialog(`Alle ${state.flights.length} Flüge löschen?\nDie Flugplatz-Datenbank bleibt erhalten. Das kann nicht rückgängig gemacht werden.`, 'Alle Flüge löschen')) return;
+  const note = Folder.ready() ? '\nDie IGC-Dateien im Flugbuch-Ordner bleiben erhalten und werden beim nächsten Einlesen wieder übernommen.' : '';
+  if (!await confirmDialog(`Alle ${state.flights.length} Flüge löschen?\nDie Flugplatz-Datenbank bleibt erhalten. Das kann nicht rückgängig gemacht werden.${note}`, 'Alle Flüge löschen')) return;
   for (const f of state.flights) await Store.del(trackKey(f.id));
   state.flights = [];
+  state.ignored = [];
   await saveFlights(); render();
   toast('Flugbuch geleert.', 'ok');
 }
@@ -1575,14 +1642,283 @@ function showBackup() {
   });
 }
 
+// ---------- Lokaler Flugbuch-Ordner (File System Access API: Chrome, Edge, Brave, Opera) ----------
+// Die IGC-Dateien bleiben in einem Ordner auf dem Rechner. Die App merkt sich den Ordner, liest beim Start neue
+// Dateien automatisch ein und schreibt ihre Daten (ohne Tracks) zusätzlich als kleine flugbuch.json in den Ordner.
+const DATA_FILE = 'flugbuch.json';
+const Folder = (() => {
+  const supported = typeof window.showDirectoryPicker === 'function';
+  let handle = null, perm = 'none', lastSync = 0, syncing = false, writeTimer = null, writeErrShown = false, loading = false, persistAsked = false;
+  const errorKeys = new Set();
+
+  // Der Ordner-Handle lässt sich nur in IndexedDB ablegen (nicht als Text), daher eine eigene kleine Datenbank.
+  const hdb = () => new Promise((res, rej) => {
+    const r = indexedDB.open('igc-flugbuch-ordner', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('h');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  async function keepHandle(h) {
+    try {
+      const db = await hdb();
+      await new Promise((res, rej) => {
+        const tx = db.transaction('h', 'readwrite'), s = tx.objectStore('h');
+        if (h) s.put(h, 'dir'); else s.delete('dir');
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      db.close();
+    } catch (e) { console.warn('Ordner-Verknüpfung nicht gespeichert', e); }
+  }
+  async function storedHandle() {
+    try {
+      const db = await hdb();
+      const h = await new Promise((res, rej) => { const r = db.transaction('h').objectStore('h').get('dir'); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); });
+      db.close();
+      return h;
+    } catch (e) { return null; }
+  }
+
+  const ready = () => !!handle && perm === 'granted';
+  const name = () => (handle ? handle.name : '');
+
+  async function init() {
+    if (!supported) return;
+    handle = await storedHandle();
+    if (handle) {
+      try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch (e) { perm = 'prompt'; }
+    }
+    updateUi();
+    if (ready()) await activate();
+  }
+  async function activate() { await readData(); await sync(); }
+
+  async function choose() {
+    if (!supported) { toast('Dieser Browser unterstützt keinen Ordnerzugriff. Bitte Chrome, Edge, Brave oder Opera verwenden.', 'warn', 7000); return; }
+    let h;
+    try { h = await window.showDirectoryPicker({ id: 'igc-flugbuch', mode: 'readwrite' }); }
+    catch (e) { if (e.name !== 'AbortError') toast('Ordner konnte nicht geöffnet werden: ' + e.message, 'error'); return; }
+    handle = h; perm = 'granted'; errorKeys.clear();
+    await keepHandle(h);
+    updateUi();
+    toast(`Flugbuch-Ordner „${h.name}“ verbunden.`, 'ok');
+    await activate();
+  }
+  async function reconnect() {
+    if (!handle) return choose();
+    try { perm = await handle.requestPermission({ mode: 'readwrite' }); } catch (e) { perm = 'denied'; }
+    updateUi();
+    if (ready()) await activate();
+    else toast('Der Zugriff auf den Ordner wurde nicht erlaubt.', 'warn');
+  }
+  async function disconnect() {
+    handle = null; perm = 'none'; clearTimeout(writeTimer);
+    await keepHandle(null);
+    updateUi();
+    toast('Ordner getrennt. Die Flüge bleiben im Browser gespeichert.', 'ok');
+  }
+
+  async function* walk(dir, prefix, depth) {
+    for await (const [n, h] of dir.entries()) {
+      if (h.kind === 'file' && /\.igc$/i.test(n)) yield { path: prefix + n, h };
+      else if (h.kind === 'directory' && depth < 4 && !n.startsWith('.')) yield* walk(h, prefix + n + '/', depth + 1);
+    }
+  }
+
+  // Nur Dateien lesen, deren Pfad/Größe/Änderungszeit noch unbekannt ist – das hält den Start schnell.
+  async function sync() {
+    if (!ready() || syncing) return;
+    syncing = true; updateUi();
+    try {
+      const known = new Set(state.flights.map(f => f.srcKey).concat(state.ignored.map(i => i.srcKey)).filter(Boolean));
+      const todo = [];
+      for await (const { path, h } of walk(handle, '', 0)) {
+        const file = await h.getFile();
+        const key = `${path}|${file.size}|${file.lastModified}`;
+        if (!known.has(key)) todo.push({ file, path, key });
+      }
+      if (todo.length) await importFiles(todo, { fromFolder: true });
+      lastSync = Date.now();
+    } catch (e) {
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') perm = 'prompt';
+      toast('Der Flugbuch-Ordner konnte nicht gelesen werden: ' + e.message, 'error');
+    } finally { syncing = false; updateUi(); }
+  }
+
+  // Die aktuellere Seite gewinnt (savedAt). Lokale Flüge, die in der Datei fehlen und dort nicht gelöscht wurden, bleiben erhalten.
+  async function readData() {
+    if (!ready()) return;
+    let data = null;
+    try { data = JSON.parse(await (await (await handle.getFileHandle(DATA_FILE)).getFile()).text()); }
+    catch (e) { if (e.name !== 'NotFoundError') toast(`${DATA_FILE} im Ordner konnte nicht gelesen werden: ${e.message}`, 'warn'); }
+    if (!data || data.app !== 'igc-flugbuch' || !Array.isArray(data.flights)) { scheduleWrite(); return; }
+    const fileTime = data.savedAt || '', localTime = state.meta.savedAt || '';
+    if (fileTime > localTime) {
+      loading = true;
+      let localOnly = [];
+      try {
+        const flights = data.flights.filter(f => f && f.id && f.hash);
+        const ignored = Array.isArray(data.ignored) ? data.ignored : [];
+        const inFile = new Set(flights.map(f => f.hash).concat(ignored.map(i => i.hash)));
+        localOnly = state.flights.filter(f => !inFile.has(f.hash));
+        state.flights = flights.concat(localOnly);
+        state.ignored = ignored;
+        if (Array.isArray(data.airfields)) state.airfields = data.airfields;
+        rematchAll();
+        await Store.set(K_FLIGHTS, JSON.stringify(state.flights));
+        await Store.set(K_AIRFIELDS, JSON.stringify(state.airfields));
+        state.meta.savedAt = localOnly.length ? new Date().toISOString() : fileTime;
+        await Store.set(K_META, JSON.stringify({ savedAt: state.meta.savedAt, ignored: state.ignored }));
+      } finally { loading = false; }
+      render();
+      if (localOnly.length) scheduleWrite();
+      if (!localTime) toast(`Flugbuch aus „${handle.name}/${DATA_FILE}“ übernommen (${state.flights.length} Flüge).`, 'ok');
+    } else if (fileTime < localTime) scheduleWrite();
+  }
+
+  function scheduleWrite() {
+    if (!ready() || loading) return;
+    clearTimeout(writeTimer);
+    writeTimer = setTimeout(writeData, 800);
+  }
+  async function writeData() {
+    if (!ready()) return;
+    const data = {
+      app: 'igc-flugbuch', kind: 'ordner', version: 1, savedAt: state.meta.savedAt || new Date().toISOString(),
+      hinweis: 'Automatisch vom IGC-Flugbuch geschrieben. Die Tracks stehen in den IGC-Dateien dieses Ordners.',
+      flights: state.flights, airfields: state.airfields, ignored: state.ignored
+    };
+    try {
+      const w = await (await handle.getFileHandle(DATA_FILE, { create: true })).createWritable();
+      await w.write(JSON.stringify(data, null, 1));
+      await w.close();
+      writeErrShown = false;
+    } catch (e) {
+      if (!writeErrShown) { writeErrShown = true; toast(`${DATA_FILE} konnte nicht in den Ordner geschrieben werden: ${e.message}`, 'error', 7000); }
+    }
+  }
+
+  // Kopie einer per Drag & Drop importierten Datei im Ordner ablegen (gleichnamige, identische Datei wird nur verknüpft)
+  async function storeCopy(fileName, buf) {
+    if (!ready()) return null;
+    try {
+      const base = fileName.replace(/[\\/:*?"<>|]/g, '_');
+      const dot = base.lastIndexOf('.') > 0 ? base.lastIndexOf('.') : base.length;
+      const hash = C.hashText(C.decodeBytes(buf));
+      for (let n = 1; n <= 50; n++) {
+        const nm = n === 1 ? base : `${base.slice(0, dot)}_${n}${base.slice(dot)}`;
+        let fh = null;
+        try { fh = await handle.getFileHandle(nm); } catch (e) { /* frei */ }
+        if (fh) {
+          const ex = await fh.getFile();
+          if (C.hashText(C.decodeBytes(await readFile(ex))) === hash) return { path: nm, key: `${nm}|${ex.size}|${ex.lastModified}` };
+          continue;
+        }
+        fh = await handle.getFileHandle(nm, { create: true });
+        const w = await fh.createWritable(); await w.write(buf); await w.close();
+        const file = await fh.getFile();
+        return { path: nm, key: `${nm}|${file.size}|${file.lastModified}` };
+      }
+    } catch (e) { toast('Kopie in den Flugbuch-Ordner fehlgeschlagen: ' + e.message, 'warn'); }
+    return null;
+  }
+
+  // Track aus der IGC-Datei im Ordner neu berechnen (z. B. nachdem das Flugbuch aus flugbuch.json übernommen wurde)
+  async function rebuildTrack(f) {
+    if (!handle) return null;
+    if (perm !== 'granted') {
+      try { perm = await handle.requestPermission({ mode: 'readwrite' }); } catch (e) { /* abgelehnt */ }
+      updateUi();
+      if (perm !== 'granted') return null;
+      setTimeout(activate, 0);
+    }
+    try {
+      const parts = f.srcPath.split('/');
+      let dir = handle;
+      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+      const file = await (await dir.getFileHandle(parts[parts.length - 1])).getFile();
+      const { track } = C.analyzeIGC(C.decodeBytes(await readFile(file)));
+      await Store.set(trackKey(f.id), JSON.stringify(track));
+      return track;
+    } catch (e) { return null; }
+  }
+
+  function firstError(key) {
+    if (!key) return true;
+    if (errorKeys.has(key)) return false;
+    errorKeys.add(key); return true;
+  }
+
+  // Browser bitten, den Speicher nicht automatisch aufzuräumen (einmal pro Sitzung, nach dem ersten Import)
+  async function askPersist() {
+    if (persistAsked) return;
+    persistAsked = true;
+    try { if (navigator.storage && navigator.storage.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch (e) { /* egal */ }
+  }
+
+  function updateUi() {
+    const banner = $('folderBanner'), chip = $('folderChip');
+    if (handle && !ready()) {
+      banner.hidden = false;
+      banner.replaceChildren(el('span', { html: icon('folder', 24) }),
+        el('div', { class: 'txt' }, el('b', { text: `Flugbuch-Ordner „${handle.name}“` }),
+          el('span', { text: 'Der Browser fragt nach einem Neustart einmal nach, ob die App den Ordner wieder lesen darf. Danach werden neue IGC-Dateien automatisch übernommen.' })),
+        el('button', { type: 'button', class: 'btn primary', html: icon('refresh', 16) + '<span>Zugriff erlauben</span>', onclick: reconnect }));
+    } else banner.hidden = true;
+    chip.hidden = !ready();
+    if (ready()) {
+      chip.classList.toggle('busy', syncing);
+      chip.innerHTML = icon('refresh', 14) + `<span>Ordner „${escapeHtml(handle.name)}“ · ${syncing ? 'liest …' : 'aktuell'}</span>`;
+      chip.setAttribute('data-tip', 'Ordner jetzt neu einlesen');
+    }
+    document.dispatchEvent(new Event('folderchange'));
+  }
+
+  return { supported, init, choose, reconnect, disconnect, sync, ready, name, scheduleWrite, storeCopy, rebuildTrack, firstError, askPersist,
+    get lastSync() { return lastSync; } };
+})();
+
+function showFolder() {
+  const body = el('div');
+  const draw = () => {
+    const linked = state.flights.filter(f => f.srcPath).length;
+    const st = !Folder.supported ? ['', 'In diesem Browser nicht verfügbar', 'Ordnerzugriff gibt es in Chrome, Edge, Brave und Opera. Firefox und Safari unterstützen ihn nicht – dort bleiben die Flüge im Browser-Speicher.']
+      : Folder.ready() ? ['on', `Verbunden: „${Folder.name()}“`, `${linked} von ${state.flights.length} Flügen sind mit einer IGC-Datei im Ordner verknüpft.`]
+      : Folder.name() ? ['wait', `„${Folder.name()}“ – Zugriff erlauben`, 'Nach einem Neustart des Browsers muss der Zugriff einmal bestätigt werden.']
+      : ['', 'Kein Ordner verbunden', 'Die Flüge liegen nur im Speicher dieses Browsers.'];
+    const btn = (ic, label, cls, fn) => el('button', { type: 'button', class: 'btn ' + (cls || ''), html: icon(ic, 16) + `<span>${label}</span>`, onclick: async () => { await fn(); draw(); } });
+    const copy = el('input', { type: 'checkbox', checked: state.settings.copyImports !== false, onchange: async () => { state.settings.copyImports = copy.checked; await saveSettings(); } });
+    body.replaceChildren(...[
+      el('p', { class: 'hint', text: 'Alles bleibt auf Ihrem Rechner: Die App liest die IGC-Dateien direkt aus einem Ordner Ihrer Wahl, hochgeladen wird nichts. Beim Öffnen der App werden neue Dateien im Ordner automatisch übernommen – bereits bekannte werden nicht erneut gelesen.' }),
+      el('p', { class: 'hint', text: `Zusätzlich legt die App im Ordner eine kleine Datei „${DATA_FILE}“ mit Ihren Änderungen ab (Namen, Startarten, Flugplätze). Damit ist das Flugbuch auch nach dem Löschen des Browser-Speichers oder auf einem anderen Rechner sofort wieder da.` }),
+      el('div', { class: 'status-box' }, el('span', { class: 'dot ' + st[0] }), el('div', null, el('b', { text: st[1] }), el('span', { text: st[2] }))),
+      Folder.supported ? el('div', { class: 'row', style: 'margin-bottom:8px' },
+        btn('folder', Folder.name() ? 'Anderen Ordner wählen …' : 'Ordner wählen …', Folder.name() ? '' : 'primary', Folder.choose),
+        Folder.ready() ? btn('refresh', 'Jetzt einlesen', '', Folder.sync) : (Folder.name() ? btn('refresh', 'Zugriff erlauben', 'primary', Folder.reconnect) : null),
+        Folder.name() ? btn('unlink', 'Trennen', '', Folder.disconnect) : null) : null,
+      Folder.supported ? el('label', { class: 'check' }, copy, 'Per Drag & Drop importierte IGC-Dateien in den Ordner kopieren') : null,
+      state.ignored.length ? el('div', { class: 'section' }, el('h3', { text: 'Gelöschte Flüge' }),
+        el('p', { class: 'hint', text: `${state.ignored.length} ${state.ignored.length === 1 ? 'gelöschter Flug wird' : 'gelöschte Flüge werden'} beim Einlesen des Ordners übersprungen.` }),
+        btn('restore', 'Wieder ins Flugbuch übernehmen', '', async () => { state.ignored = []; await touch(); await Folder.sync(); })) : null
+    ].filter(Boolean));
+  };
+  document.addEventListener('folderchange', draw);
+  openModal({ title: 'Flugbuch-Ordner', body, onClose: () => document.removeEventListener('folderchange', draw) });
+  draw();
+}
+
 // ---------- Initialisierung ----------
 function wireUi() {
   $('brandIcon').innerHTML = icon('glider', 24);
   $('dropIcon').innerHTML = icon('upload', 22);
   $('searchIcon').innerHTML = icon('search', 16);
   $('utcNote').innerHTML = icon('clock', 14) + '<span>Alle Zeiten in <b>UTC</b></span>';
-  const tb = [['btnAirfields', 'runway', 'Flugplätze'], ['btnCsv', 'download', 'CSV-Export'], ['btnBackup', 'save', 'Sicherung'], ['btnSettings', 'sliders', 'Einstellungen']];
+  const tb = [['btnFolder', 'folder', 'Ordner'], ['btnAirfields', 'runway', 'Flugplätze'], ['btnCsv', 'download', 'CSV-Export'], ['btnBackup', 'save', 'Sicherung'], ['btnSettings', 'sliders', 'Einstellungen']];
   for (const [id, ic, label] of tb) { $(id).innerHTML = icon(ic, 17) + `<span class="lbl">${label}</span>`; $(id).setAttribute('aria-label', label); $(id).setAttribute('data-tip', label); }
+  $('btnFolder').onclick = showFolder;
+  $('btnFolder').setAttribute('data-tip', 'Lokaler Flugbuch-Ordner');
+  $('folderChip').onclick = () => (Folder.ready() ? Folder.sync() : Folder.reconnect());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Folder.ready() && Date.now() - Folder.lastSync > 15000) Folder.sync();
+  });
   $('btnAirfields').onclick = showAirfields;
   $('btnCsv').onclick = exportCsv;
   $('btnBackup').onclick = showBackup;
@@ -1615,10 +1951,14 @@ async function init() {
   await Store.init();
   state.flights = (await loadJSON(K_FLIGHTS, [])).filter(f => f && f.id);
   state.airfields = await loadJSON(K_AIRFIELDS, []);
-  state.settings = Object.assign({ apiKey: '' }, await loadJSON(K_SETTINGS, {}));
+  state.settings = Object.assign({ apiKey: '', copyImports: true }, await loadJSON(K_SETTINGS, {}));
+  const meta = await loadJSON(K_META, {});
+  state.meta.savedAt = meta.savedAt || (state.flights.length ? '0' : '');
+  state.ignored = Array.isArray(meta.ignored) ? meta.ignored : [];
   render();
   if (Store.mode === 'memory') toast('Dauerhafte Speicherung ist in diesem Browser nicht verfügbar – Daten gehen beim Schließen verloren.', 'warn', 9000);
-  window.Flugbuch = { importFiles, state }; // für Tests / Konsole
+  window.Flugbuch = { importFiles, state, Folder }; // für Tests / Konsole
+  await Folder.init();
 }
 init();
 })();

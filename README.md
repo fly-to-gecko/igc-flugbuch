@@ -19,11 +19,25 @@ Startart und Flugplätze werden automatisch erkannt. Eine einzige HTML-Datei, ke
 - IGC-Header (A-, H-, I-Zeilen) als Rohtext
 - CSV-Export (`;`, UTF-8 mit BOM für Excel) und JSON-Sicherung zum Übertragen/Wiederherstellen
 
-## Speicherung
+## Speicherung – alles bleibt lokal
 
-Die Daten bleiben im Browser: `window.storage` (Claude-Artifact), sonst IndexedDB, sonst `localStorage`.
-IndexedDB wird bevorzugt, weil die Tracks für Karte und Barogramm mitgespeichert werden und `localStorage`
-(~5 MB) dafür schnell zu klein wäre. Das Flugbuch startet leer. **Regelmäßig über „Sicherung“ exportieren.**
+Die IGC-Dateien werden nur im Browser ausgewertet, hochgeladen wird nichts.
+
+**Flugbuch-Ordner (empfohlen, Chrome/Edge/Brave/Opera):** Über „Ordner“ einen Ordner auf dem Rechner wählen.
+Die App merkt sich diesen Ordner und
+- liest beim Öffnen neue IGC-Dateien automatisch ein (auch aus Unterordnern; bekannte Dateien werden nicht erneut gelesen),
+- schreibt ihre Daten (Flüge, Änderungen, Flugplätze – ohne Tracks) als kleine Datei `flugbuch.json` in den Ordner,
+- kopiert per Drag & Drop importierte Dateien auf Wunsch in den Ordner,
+- überspringt gelöschte Flüge beim Einlesen, auch wenn die IGC-Datei noch im Ordner liegt.
+
+Nach einem Browser-Neustart fragt der Browser einmal nach, ob die App den Ordner wieder lesen darf
+(Banner „Zugriff erlauben“). Ist der Browser-Speicher gelöscht oder wird der Ordner auf einem anderen Rechner
+verbunden, wird das Flugbuch aus `flugbuch.json` übernommen und die Tracks werden aus den IGC-Dateien neu berechnet.
+Gibt es Änderungen auf beiden Seiten, gewinnt die zuletzt gespeicherte Seite.
+
+**Browser-Speicher:** Zusätzlich liegen die Daten im Browser: `window.storage` (Claude-Artifact), sonst IndexedDB,
+sonst `localStorage`. Ohne Ordner (z. B. in Firefox) sollte man regelmäßig über „Sicherung“ exportieren.
+Das Flugbuch startet leer.
 
 ## Erkennungslogik
 
