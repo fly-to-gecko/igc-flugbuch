@@ -1544,7 +1544,7 @@ async function showTrack(f, opts = {}) {
   openMap(`${opts.airspace ? 'Luftraum-Einflüge' : 'Flugstrecke'} ${planeText(f) || ''}`.trim(), `${C.fmtDateDE(f.date)} · ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC`,
     [el('span', null, 'Start: ', el('b', { text: placeText(f, 'start') })), el('span', null, 'Landung: ', el('b', { text: placeText(f, 'land') })),
      el('span', null, 'Flugzeit: ', el('b', { text: C.fmtDuration(f.durationMin) })), el('span', null, 'Spurlänge: ', el('b', { text: (dist / 1000).toFixed(0) + ' km' })),
-     el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' })), legend],
+     el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' })), ...legend],
     (m, g) => {
       if (pts.length > fl.length) L.polyline(pts, { color: '#7a8a96', weight: 2, opacity: 0.6 }).addTo(g);
       const flPts = fl.length > 1 ? fl : pts;
