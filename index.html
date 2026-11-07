@@ -1310,7 +1310,9 @@ async function showTrack(f) {
      el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' }))],
     (m, g) => {
       if (pts.length > fl.length) L.polyline(pts, { color: '#7a8a96', weight: 2, opacity: 0.6 }).addTo(g);
-      const line = L.polyline(fl.length > 1 ? fl : pts, { color: '#d9822b', weight: 3, opacity: 0.95 }).addTo(g);
+      const flPts = fl.length > 1 ? fl : pts;
+      L.polyline(flPts, { color: '#ffffff', weight: 8, opacity: 0.7 }).addTo(g); // heller Rand für Kontrast auf jeder Kartenart
+      const line = L.polyline(flPts, { color: '#0b3a8c', weight: 5, opacity: 1 }).addTo(g);
       L.circleMarker([f.startLat, f.startLon], startStyle).bindTooltip(`Start ${C.fmtHM(f.takeoffT)} UTC – ${placeText(f, 'start')}`).addTo(g);
       L.circleMarker([f.landLat, f.landLon], landStyle).bindTooltip(`Landung ${C.fmtHM(f.landingT)} UTC – ${placeText(f, 'land')}`).addTo(g);
       m.fitBounds(line.getBounds(), { padding: [30, 30] });
