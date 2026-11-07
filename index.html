@@ -1534,12 +1534,17 @@ async function showTrack(f, opts = {}) {
   for (let i = 0; i < pts.length; i++) { const t = tr.t0 + tr.t[i]; if (t >= f.takeoffT && t <= f.landingT) fl.push(pts[i]); }
   let dist = 0;
   for (let i = 1; i < fl.length; i++) dist += C.haversine(fl[i - 1][0], fl[i - 1][1], fl[i][0], fl[i][1]);
-  const findings = opts.airspace && f.asResult ? f.asResult.findings.filter(x => x.kind !== 'info' || opts.withInfo) : [];
-  const asIdx = findings.length ? Airspace.index() : null;
-  openMap(`${findings.length ? 'Luftraum-Einflüge' : 'Flugstrecke'} ${planeText(f) || ''}`.trim(), `${C.fmtDateDE(f.date)} · ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC`,
+  // Abschnitte mit Verletzung (rot) bzw. „prüfen“ (orange) werden in jeder Streckenansicht eingefärbt;
+  // die Luftraum-Ansicht zeigt zusätzlich die Lufträume selbst und alle übrigen Einflüge.
+  const all = f.asResult ? f.asResult.findings : [];
+  const findings = opts.airspace ? all.filter(x => x.kind !== 'info' || opts.withInfo) : all.filter(x => x.kind === 'verletzung' || x.kind === 'pruefen');
+  const asIdx = opts.airspace && findings.length ? Airspace.index() : null;
+  const legendItem = (kind, label) => findings.some(x => x.kind === kind) ? el('span', null, el('b', { style: 'color:' + AS_COLORS[kind], text: '━ ' }), label) : null;
+  const legend = [legendItem('verletzung', 'Luftraumverletzung'), legendItem('pruefen', 'Luftraum prüfen')];
+  openMap(`${opts.airspace ? 'Luftraum-Einflüge' : 'Flugstrecke'} ${planeText(f) || ''}`.trim(), `${C.fmtDateDE(f.date)} · ${C.fmtHM(f.takeoffT)}–${C.fmtHM(f.landingT)} UTC`,
     [el('span', null, 'Start: ', el('b', { text: placeText(f, 'start') })), el('span', null, 'Landung: ', el('b', { text: placeText(f, 'land') })),
      el('span', null, 'Flugzeit: ', el('b', { text: C.fmtDuration(f.durationMin) })), el('span', null, 'Spurlänge: ', el('b', { text: (dist / 1000).toFixed(0) + ' km' })),
-     el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' }))],
+     el('span', null, 'max. Höhe: ', el('b', { text: f.maxAlt + ' m (' + f.altSource + ')' })), legend],
     (m, g) => {
       if (pts.length > fl.length) L.polyline(pts, { color: '#7a8a96', weight: 2, opacity: 0.6 }).addTo(g);
       const flPts = fl.length > 1 ? fl : pts;
@@ -1548,7 +1553,7 @@ async function showTrack(f, opts = {}) {
       let bounds = line.getBounds();
       for (const x of findings) {
         const color = AS_COLORS[x.kind];
-        const a = asIdx.get(x.ref);
+        const a = asIdx && asIdx.get(x.ref);
         if (a) {
           const poly = L.polygon(a.poly, { color, weight: 2, fillOpacity: 0.12, dashArray: x.kind === 'sektor' ? '6 4' : null })
             .bindTooltip(escapeHtml(`${a.cls} ${a.name} (${a.lo.text} – ${a.hi.text})`)).addTo(g);
@@ -1558,7 +1563,8 @@ async function showTrack(f, opts = {}) {
         for (let i = 0; i < pts.length; i++) { const t = tr.t0 + tr.t[i]; if (t >= x.t1 && t <= x.t2) seg.push(pts[i]); }
         if (seg.length === 1) seg.push(seg[0]);
         if (seg.length) {
-          L.polyline(seg, { color, weight: 7, opacity: 0.95 }).bindTooltip(escapeHtml(`${AS_LABELS[x.kind]}: ${x.cls} ${x.name}`) + `<br>${C.fmtHM(x.t1)}–${C.fmtHM(x.t2)} UTC`).addTo(g);
+          L.polyline(seg, { color: '#ffffff', weight: 10, opacity: 0.8 }).addTo(g);
+          L.polyline(seg, { color, weight: 6, opacity: 1 }).bindTooltip(escapeHtml(`${AS_LABELS[x.kind]}: ${x.cls} ${x.name}`) + `<br>${C.fmtHM(x.t1)}–${C.fmtHM(x.t2)} UTC`).addTo(g);
           bounds = opts.airspace ? L.latLngBounds(seg).extend(bounds) : bounds;
         }
       }
