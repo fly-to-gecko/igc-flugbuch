@@ -70,8 +70,15 @@ Flugbuch übereinstimmen. Landungen nach Mitternacht werden mit `+1` markiert.
 | Segelflugsektor (Klasse W oder Name „Sektor“) | eigener Hinweis; Einflüge in C/D/CTR innerhalb eines Sektors gelten nicht als Verletzung |
 | E, F, G | ignoriert |
 
-- Höhe: Grenzen in Flugflächen werden mit der **Druckhöhe** (IGC, Standardatmosphäre) verglichen,
-  Grenzen in ft/m MSL mit der GPS-Höhe, Grenzen über Grund mit der Höhe über dem Startplatz (geschätzt → „prüfen“).
+- Höhe – im IGC stehen zwei Höhen:
+  - **Druckhöhe** bezogen auf die Standardatmosphäre (1013,25 hPa). Grenzen in **Flugflächen** werden direkt damit verglichen.
+  - **GPS-Höhe**, meist über dem WGS84-Ellipsoid, in Mitteleuropa also rund 40–50 m über Meereshöhe
+    (bei 28 Testflügen: im Mittel +39 m über der Platzhöhe; die Druckhöhe lag je nach QNH −100 … +10 m daneben).
+  - Für **MSL-Grenzen** (gelten für den Höhenmesser auf QNH) wird die Druckhöhe auf die Platzhöhe des Startplatzes
+    abgeglichen – das entspricht dem QNH. Ist auch die Landeplatzhöhe bekannt, wird die QNH-Änderung während des Flugs
+    linear ausgeglichen. Die Platzhöhen kommen aus der Flugplatz-Datenbank (CUP-Import, openAIP).
+  - Ohne bekannte Platzhöhe: GPS-Höhe minus 45 m (geschätzte Geoid-Undulation); knappe Einflüge (< 60 m) gelten dann als „prüfen“.
+  - Grenzen über Grund: Höhe über dem Startplatz (Gelände unbekannt → „prüfen“).
 - Toleranz 30 m vertikal; Einflüge mit Lücken über 90 s werden getrennt gezählt.
 - Liegt der Start- oder Landepunkt selbst im Luftraum (Flugplatz in der CTR), wird „prüfen“ statt „Verletzung“ gemeldet.
 - Mehrere Datensätze mit „gültig ab“-Datum möglich: Für jeden Flug zählt der jüngste Jahrgang, der zum Flugdatum galt.

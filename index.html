@@ -829,11 +829,56 @@ const Core = (() => {
     return best;
   }
 
-  // Höhe eines Punkts bezogen auf die Art der Grenze: FL → Druckhöhe, MSL → GPS-Höhe, AGL → über Startplatzhöhe (geschätzt)
+  // Höhen im IGC: Druckhöhe = Standardatmosphäre (1013,25 hPa) → richtig für Flugflächen.
+  // GPS-Höhe = meist über dem WGS84-Ellipsoid, in Mitteleuropa rund 40–50 m über Meereshöhe.
+  // MSL-Grenzen gelten für den Höhenmesser auf QNH. Deshalb wird – wenn die Platzhöhe bekannt ist – die Druckhöhe
+  // auf die Platzhöhe abgeglichen (entspricht QNH), bei bekannter Landeplatzhöhe mit Ausgleich der QNH-Änderung.
+  const GEOID_DEFAULT = 45; // m, mittlere Geoid-Undulation Mitteleuropa (nur wenn keine Platzhöhe bekannt ist)
+  const M_PER_HPA = 8.3;    // Höhenänderung je hPa in Bodennähe
+  function altitudeModel(track, flight, opts = {}) {
+    const n = track.t.length, T = i => track.t0 + track.t[i];
+    const hasP = !!track.palt && track.palt.some(v => v !== 0);
+    const gps = (opts.altSource || flight.altSource || 'GPS') === 'GPS';
+    const around = (t0, t1) => { const idx = []; for (let i = 0; i < n; i++) if (T(i) >= t0 && T(i) <= t1) idx.push(i); return idx; };
+    let iTo = around(flight.takeoffT - 120, flight.takeoffT + 2);
+    if (!iTo.length) iTo = around(flight.takeoffT, flight.takeoffT + 60).slice(0, 1);
+    let iLd = around(flight.landingT - 2, flight.landingT + 120);
+    if (!iLd.length) iLd = around(flight.landingT - 60, flight.landingT).slice(-1);
+    const med = (idx, arr) => (idx.length ? median(idx.map(i => arr[i])) : null);
+    const e0 = opts.takeoffElev != null && isFinite(opts.takeoffElev) ? opts.takeoffElev : null;
+    const e1 = opts.landingElev != null && isFinite(opts.landingElev) ? opts.landingElev : null;
+    let msl, method, estimated = false, qnh = null;
+    if (hasP && e0 != null && iTo.length) {
+      const o0 = e0 - med(iTo, track.palt);
+      const o1 = e1 != null && iLd.length ? e1 - med(iLd, track.palt) : o0;
+      const span = Math.max(1, flight.landingT - flight.takeoffT);
+      msl = i => track.palt[i] + o0 + (o1 - o0) * Math.min(1, Math.max(0, (T(i) - flight.takeoffT) / span));
+      qnh = Math.round(1013.25 + o0 / M_PER_HPA);
+      method = `QNH-Höhe aus der Druckhöhe, abgeglichen mit der Startplatzhöhe ${Math.round(e0)} m (≈ QNH ${qnh} hPa)` +
+        (e1 != null && iLd.length ? `, QNH-Änderung bis zur Landung (Platzhöhe ${Math.round(e1)} m) ausgeglichen` : '');
+    } else if (gps && e0 != null && iTo.length) {
+      const o0 = e0 - med(iTo, track.alt);
+      msl = i => track.alt[i] + o0;
+      method = `GPS-Höhe, abgeglichen mit der Startplatzhöhe ${Math.round(e0)} m`;
+    } else if (gps) {
+      const g = opts.geoid != null ? opts.geoid : GEOID_DEFAULT;
+      msl = i => track.alt[i] - g;
+      method = g ? `GPS-Höhe minus geschätzte Geoid-Undulation (${g} m) – Startplatzhöhe unbekannt` : 'GPS-Höhe';
+      estimated = !!g;
+    } else {
+      msl = i => track.alt[i];
+      method = 'Druckhöhe ohne QNH-Abgleich – Startplatzhöhe unbekannt';
+      estimated = true;
+    }
+    const fl = hasP ? (i => track.palt[i]) : msl;
+    const ground = e0 != null ? e0 : (iTo.length ? median(iTo.map(msl)) : msl(0));
+    return { msl, fl, ground, method, estimated, qnh, flNote: hasP ? '' : 'Keine Druckhöhe in der Datei – Flugflächen mit der MSL-Höhe verglichen.' };
+  }
+
   function levelFor(limit, p) {
-    if (limit.ref === 'FL') return p.palt != null ? p.palt : p.alt;
-    if (limit.ref === 'AGL') return p.alt - p.ground;
-    return p.alt;
+    if (limit.ref === 'FL') return p.fl;
+    if (limit.ref === 'AGL') return p.msl - p.ground;
+    return p.msl;
   }
   function verticalDepth(a, p, tol) {
     const below = a.hi.ref === 'UNL' ? Infinity : a.hi.m - levelFor(a.hi, p);
@@ -841,17 +886,20 @@ const Core = (() => {
     return Math.min(below, above) - tol;
   }
 
-  // track: kompakter Track (siehe compactTrack); flight: takeoffT/landingT; airspaces: parseOpenAir-Items
-  function checkAirspaces(track, flight, airspaces, tol = AS_CFG.vertTol) {
+  // track: kompakter Track (siehe compactTrack); flight: takeoffT/landingT/altSource; airspaces: parseOpenAir-Items
+  // opts: tol, takeoffElev, landingElev (Platzhöhen in m, falls bekannt), geoid
+  function checkAirspaces(track, flight, airspaces, opts = {}) {
+    const tol = opts.tol != null ? opts.tol : AS_CFG.vertTol;
+    const model = altitudeModel(track, flight, opts);
     const pts = [];
     for (let i = 0; i < track.t.length; i++) {
       const t = track.t0 + track.t[i];
       if (t < flight.takeoffT || t > flight.landingT) continue;
-      pts.push({ t, lat: track.lat[i] / 1e5, lon: track.lon[i] / 1e5, alt: track.alt[i], palt: track.palt ? track.palt[i] : null });
+      pts.push({ t, lat: track.lat[i] / 1e5, lon: track.lon[i] / 1e5, msl: model.msl(i), fl: model.fl(i), ground: model.ground });
     }
-    if (!pts.length) return [];
-    const ground = pts[0].alt;
-    for (const p of pts) p.ground = ground;
+    const result = [];
+    result.altRef = { method: model.method, estimated: model.estimated, qnh: model.qnh, flNote: model.flNote };
+    if (!pts.length) return result;
     let s = 90, w = 180, n = -90, e = -180;
     for (const p of pts) { s = Math.min(s, p.lat); n = Math.max(n, p.lat); w = Math.min(w, p.lon); e = Math.max(e, p.lon); }
     const near = airspaces.filter(a => a.bbox[0] <= n && a.bbox[2] >= s && a.bbox[1] <= e && a.bbox[3] >= w);
@@ -874,7 +922,7 @@ const Core = (() => {
         if (inSector) ep.sectorPoints++;
         ep.maxVert = Math.max(ep.maxVert, Math.min(dv + tol, 99999));
         ep.maxHoriz = Math.max(ep.maxHoriz, distToEdge(p.lat, p.lon, a.poly));
-        ep.minAlt = Math.min(ep.minAlt, p.alt); ep.maxAlt = Math.max(ep.maxAlt, p.alt);
+        ep.minAlt = Math.min(ep.minAlt, p.msl); ep.maxAlt = Math.max(ep.maxAlt, p.msl);
       }
       close();
     }
@@ -886,13 +934,18 @@ const Core = (() => {
       // nur wenn der Start- bzw. Landepunkt selbst im Luftraum liegt (Flugplatz in der CTR)
       const atAirfield = f.t1 === pts[0].t || f.t2 === pts[pts.length - 1].t;
       if (atAirfield && f.kind === 'verletzung') { f.kind = 'pruefen'; f.notes.push('Start oder Landung innerhalb – vermutlich mit Freigabe'); }
-      if (f.agl) { f.notes.push('Grenze über Grund – Geländehöhe geschätzt (Startplatz)'); if (f.kind === 'verletzung') f.kind = 'pruefen'; }
+      if (f.agl) { f.notes.push('Grenze über Grund – Geländehöhe = Startplatzhöhe angenommen'); if (f.kind === 'verletzung') f.kind = 'pruefen'; }
+      if (model.estimated && f.maxVert < 60 && f.kind === 'verletzung') { f.kind = 'pruefen'; f.notes.push('knapp – Höhenbezug nur geschätzt'); }
       f.maxVert = Math.round(f.maxVert); f.maxHoriz = Math.round(f.maxHoriz);
       delete f.sectorPoints;
     }
     // gleicher Luftraum aus mehreren Dateien (z. B. Land + Europa) nur einmal
     const seen = new Set();
-    return findings.sort((x, y) => x.t1 - y.t1).filter(f => { const k = f.cls + '|' + f.name + '|' + f.t1; if (seen.has(k)) return false; seen.add(k); return true; });
+    for (const f of findings.sort((x, y) => x.t1 - y.t1)) {
+      const k = f.cls + '|' + f.name + '|' + f.t1;
+      if (!seen.has(k)) { seen.add(k); result.push(f); }
+    }
+    return result;
   }
 
   // ---------- Formatierung ----------
@@ -928,7 +981,7 @@ const Core = (() => {
   return {
     CFG, LAUNCH_TYPES, haversine, decodeBytes, hashText, parseIGC, chooseAltitudes, groundSpeeds, detectFlight,
     classifyLaunch, analyzeIGC, compactTrack, parseCSVLine, parseCupLat, parseCupLon, parseElev, parseCUP,
-    parseCoordInput, matchAirfield, AS_CFG, parseOpenAirCoord, parseAltLimit, parseOpenAir, guessValidFrom, pointInPoly, checkAirspaces, fmtHM, fmtHMS, fmtDuration, fmtDateDE, fmtCoord, toCSV, isoDate
+    parseCoordInput, matchAirfield, AS_CFG, parseOpenAirCoord, parseAltLimit, parseOpenAir, guessValidFrom, pointInPoly, altitudeModel, checkAirspaces, fmtHM, fmtHMS, fmtDuration, fmtDateDE, fmtCoord, toCSV, isoDate
   };
 })();
 if (typeof window !== 'undefined') window.Core = Core;
@@ -1988,10 +2041,14 @@ const Airspace = (() => {
     const tr = await trackFor(f);
     if (!tr) return false;
     index();
-    const findings = C.checkAirspaces(tr, f, sets.flatMap(s => s.items));
+    // Platzhöhen aus der Flugplatz-Datenbank (CUP-Import/openAIP) für den QNH-Abgleich
+    const elevAt = (lat, lon) => { const m = C.matchAirfield(lat, lon, state.airfields); return m && m.airfield.elev != null ? m.airfield.elev : null; };
+    const res = C.checkAirspaces(tr, f, sets.flatMap(s => s.items), {
+      takeoffElev: elevAt(f.startLat, f.startLon), landingElev: elevAt(f.landLat, f.landLon), altSource: f.altSource });
+    const findings = Array.from(res);
     const counts = { verletzung: 0, pruefen: 0, info: 0, sektor: 0 };
     for (const x of findings) counts[x.kind]++;
-    f.asResult = { checkedAt: new Date().toISOString(), sets: sets.map(s => `${s.name} (gültig ab ${C.fmtDateDE(s.validFrom) || '?'})`), note, counts, findings, noPalt: !tr.palt };
+    f.asResult = { checkedAt: new Date().toISOString(), sets: sets.map(s => `${s.name} (gültig ab ${C.fmtDateDE(s.validFrom) || '?'})`), note, counts, findings, altRef: res.altRef };
     return true;
   }
   async function checkFlights(list, opts = {}) {
@@ -2030,12 +2087,15 @@ function showAsFindings(f) {
     kindCell(x)));
   const body = el('div', null,
     r.findings.length ? el('div', { style: 'overflow:auto' }, el('table', { class: 'ftable' },
-      el('thead', null, el('tr', null, ['Zeit (UTC)', 'Luftraum', 'Grenzen', 'GPS-Höhe', 'Eindringtiefe', 'Bewertung'].map(h => el('th', { text: h })))),
+      el('thead', null, el('tr', null, ['Zeit (UTC)', 'Luftraum', 'Grenzen', 'Höhe MSL', 'Eindringtiefe', 'Bewertung'].map(h => el('th', { text: h })))),
       el('tbody', null, rows)))
       : el('p', { text: 'Keine Einflüge in kontrollierte, gesperrte oder meldepflichtige Lufträume gefunden.' }),
     el('p', { class: 'hint', style: 'margin-top:12px' }, `Geprüft mit: ${r.sets.join(', ')}. Geprüft am ${C.fmtDateDE(r.checkedAt.slice(0, 10))}.`,
       r.note ? el('b', { style: 'display:block;color:var(--amber)', text: r.note }) : null,
-      r.noPalt ? el('span', { style: 'display:block', text: 'Diese Datei enthält keine Druckhöhe – Flugflächen wurden mit der GPS-Höhe verglichen.' }) : null),
+      r.altRef ? el('span', { style: 'display:block' }, 'Höhenbezug MSL-Grenzen: ', el('b', { style: r.altRef.estimated ? 'color:var(--amber)' : '', text: r.altRef.method }),
+        '. Flugflächen: Druckhöhe (Standardatmosphäre).') : null,
+      r.altRef && r.altRef.estimated ? el('span', { style: 'display:block', text: 'Tipp: Mit einer Flugplatzliste mit Platzhöhen (CUP-Import unter „Flugplätze“) wird die Höhe genauer – wie ein Höhenmesser auf QNH.' }) : null,
+      r.altRef && r.altRef.flNote ? el('span', { style: 'display:block', text: r.altRef.flNote }) : null),
     el('p', { class: 'disclaimer', text: 'Automatische Auswertung ohne Gewähr: Freigaben der Flugsicherung, Aktivierungszeiten (ED-R, Segelflugsektoren) und NOTAMs sind nicht bekannt. Grenzen über Grund werden mit der Startplatzhöhe geschätzt. „Prüfen“ bedeutet: bitte selbst bewerten.' }));
   const m = openModal({ title: 'Luftraumprüfung', sub: `${C.fmtDateDE(f.date)} · ${planeText(f)} · alle Zeiten UTC`, size: 'lg', body,
     foot: [

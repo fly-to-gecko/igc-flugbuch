@@ -273,7 +273,8 @@ function line(lat1, lon1, lat2, lon2, alt, palt, t0 = 1000, n = 60) {
 const AS = Core.parseOpenAir(OPENAIR).items;
 const byName = n => AS.find(a => a.name === n);
 const flightOf = pts => ({ takeoffT: pts[0][0] - 600, landingT: pts[pts.length - 1][0] + 600 });
-const check = pts => Core.checkAirspaces(mkTrack(pts), flightOf(pts), AS);
+const NEUTRAL = { geoid: 0 };
+const check = pts => Core.checkAirspaces(mkTrack(pts), flightOf(pts), AS, NEUTRAL);
 
 test('OpenAir: Koordinaten D:M:S und D:M.m', () => {
   const a = Core.parseOpenAirCoord('49:14:38 N 010:31:20 E'); near(a[0], 49 + 14 / 60 + 38 / 3600, 1e-9); near(a[1], 10 + 31 / 60 + 20 / 3600, 1e-9);
@@ -332,12 +333,12 @@ test('Luftraumprüfung: Flug im Segelflugsektor = sektor statt Verletzung', () =
 });
 test('Luftraumprüfung: Start in der CTR = prüfen (Freigabe wahrscheinlich)', () => {
   const pts = line(50.97, 9.05, 50.97, 9.4, 600);
-  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0], landingT: pts[pts.length - 1][0] + 600 }, AS).find(x => x.cls === 'CTR');
+  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0], landingT: pts[pts.length - 1][0] + 600 }, AS, NEUTRAL).find(x => x.cls === 'CTR');
   eq(f.kind, 'pruefen'); ok(f.notes.some(n => /Start/.test(n)));
 });
 test('Luftraumprüfung: Abstieg aus Luftraum C kurz vor der Landung bleibt Verletzung', () => {
   const pts = line(51.4, 9.9, 51.4, 10.5, 2100, 2100).map((p, i, arr) => i > arr.length - 8 ? [p[0], p[1], p[2], 1500, 1500] : p);
-  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0] - 600, landingT: pts[pts.length - 1][0] + 30 }, AS).find(x => x.name === 'TMA Hoch');
+  const f = Core.checkAirspaces(mkTrack(pts), { takeoffT: pts[0][0] - 600, landingT: pts[pts.length - 1][0] + 30 }, AS, NEUTRAL).find(x => x.name === 'TMA Hoch');
   eq(f.kind, 'verletzung');
 });
 test('Luftraumprüfung: Flugbeschränkungsgebiet = prüfen (Aktivierung unbekannt)', () => {
@@ -345,7 +346,39 @@ test('Luftraumprüfung: Flugbeschränkungsgebiet = prüfen (Aktivierung unbekann
 });
 test('Luftraumprüfung: Track ohne Druckhöhe nutzt GPS-Höhe für FL', () => {
   const tr = mkTrack(line(51.4, 9.9, 51.4, 10.4, 2100)); tr.palt = null;
-  ok(Core.checkAirspaces(tr, flightOf(line(51.4, 9.9, 51.4, 10.4, 2100)), AS).some(x => x.name === 'TMA Hoch'));
+  ok(Core.checkAirspaces(tr, flightOf(line(51.4, 9.9, 51.4, 10.4, 2100)), AS, NEUTRAL).some(x => x.name === 'TMA Hoch'));
+});
+
+// Höhenbezug: Boden 400 m, QNH hoch (Druckhöhe 80 m zu niedrig), GPS über Ellipsoid (+45 m).
+// Wahre Höhe beim CTR-Durchflug 880 m (34 m unter der Obergrenze 914 m).
+function qnhFlight() {
+  const ground = [], fly = [];
+  for (let i = 0; i < 12; i++) ground.push([400 + i * 10, 50.97, 8.85, 400 + 45, 400 - 80]);
+  for (const p of line(50.97, 8.9, 50.97, 9.3, 880 + 45, 880 - 80, 600)) fly.push(p);
+  const pts = ground.concat(fly);
+  return { tr: mkTrack(pts), flight: { takeoffT: 520, landingT: fly[fly.length - 1][0] + 600, altSource: 'GPS' } };
+}
+test('Höhenbezug: mit Platzhöhe wird die Druckhöhe auf QNH abgeglichen', () => {
+  const { tr, flight } = qnhFlight();
+  const r = Core.checkAirspaces(tr, flight, AS, { takeoffElev: 400 });
+  const ctr = r.find(x => x.cls === 'CTR');
+  ok(ctr && ctr.kind === 'verletzung', 'CTR-Verletzung erkannt');
+  near(ctr.maxAlt, 880, 2, 'MSL-Höhe'); eq(r.altRef.estimated, false); ok(/QNH 1023/.test(r.altRef.method), r.altRef.method);
+});
+test('Höhenbezug: unkorrigierte GPS-Höhe (Ellipsoid) hätte die Verletzung übersehen', () => {
+  const { tr, flight } = qnhFlight();
+  ok(!Core.checkAirspaces(tr, flight, AS, { geoid: 0 }).some(x => x.cls === 'CTR'));
+});
+test('Höhenbezug: ohne Platzhöhe GPS minus Geoid-Schätzung, knappe Fälle = prüfen', () => {
+  const { tr, flight } = qnhFlight();
+  const r = Core.checkAirspaces(tr, flight, AS);
+  const ctr = r.find(x => x.cls === 'CTR');
+  eq(ctr.kind, 'pruefen'); ok(ctr.notes.some(n => /geschätzt/.test(n))); eq(r.altRef.estimated, true);
+});
+test('Höhenbezug: QNH-Änderung zwischen Start und Landung wird ausgeglichen', () => {
+  const pts = [[0, 50, 8, 445, 320], [100, 50, 8, 445, 320], [1000, 50.5, 8.5, 1500, 1400], [2000, 51, 9, 445, 340], [2100, 51, 9, 445, 340]];
+  const m = Core.altitudeModel(mkTrack(pts), { takeoffT: 100, landingT: 2000 }, { takeoffElev: 400, landingElev: 400 });
+  near(m.msl(0), 400, 0.5); near(m.msl(3), 400, 0.5, 'Landung'); near(m.msl(2), 1400 + 80 - 20 * (900 / 1900), 0.5, "Mitte interpoliert");
 });
 
 // ---------- Ausgabe ----------
